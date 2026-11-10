@@ -2095,7 +2095,8 @@ def api_scan():
     data = request.get_json(silent=True) or {}
     try:
         log_id = start_scan(data.get('ip_range'), data.get('ports'),
-                            data.get('workers'))
+                            data.get('workers'),
+                            udp_ports_text=data.get('udp_ports'))
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     return jsonify({'status': 'started', 'log_id': log_id})
