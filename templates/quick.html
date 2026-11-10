@@ -127,7 +127,7 @@
                         <div class="port-list">
                             {% for p in r.tcp %}
                             <span class="badge badge-port"
-                                  title="TCP {{ p }}{% if PORT_SERVICES.get(p) %} — {{ PORT_SERVICES[p] }}{% endif %}">{{ p }}</span>
+                                  data-port-tip="TCP {{ p }}{% if PORT_SERVICES.get(p) %} — {{ PORT_SERVICES[p] }}{% endif %}">{{ p }}</span>
                             {% else %}
                             <span class="small-muted">—</span>
                             {% endfor %}
@@ -136,7 +136,8 @@
                     <td>
                         <div class="port-list">
                             {% for p in r.udp %}
-                            <span class="badge badge-port-udp">{{ p }}</span>
+                            <span class="badge badge-port-udp"
+                                  data-port-tip="UDP {{ p }}{% if PORT_SERVICES.get(p) %} — {{ PORT_SERVICES[p] }}{% endif %}">{{ p }}</span>
                             {% else %}
                             <span class="small-muted">—</span>
                             {% endfor %}

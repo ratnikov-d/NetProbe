@@ -138,4 +138,33 @@
         setInterval(poll, 1000);
     }
     });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var items = document.querySelectorAll('[data-port-tip]');
+        if (!items.length) return;
+
+        var tip = document.createElement('div');
+        tip.className = 'floating-tip';
+        document.body.appendChild(tip);
+
+        function place(x, y) {
+            var pad = 12;
+            var r = tip.getBoundingClientRect();
+            var left = Math.min(Math.max(pad, x - r.width / 2), window.innerWidth - r.width - pad);
+            var top = y - r.height - 12;
+            if (top < pad) top = y + 20;
+            tip.style.left = left + 'px';
+            tip.style.top = top + 'px';
+        }
+
+        items.forEach(function (el) {
+            el.addEventListener('mouseenter', function (e) {
+                tip.textContent = el.dataset.portTip;
+                tip.classList.add('is-visible');
+                place(e.clientX, e.clientY);
+            });
+            el.addEventListener('mousemove', function (e) { place(e.clientX, e.clientY); });
+            el.addEventListener('mouseleave', function () { tip.classList.remove('is-visible'); });
+        });
+    });
 })();

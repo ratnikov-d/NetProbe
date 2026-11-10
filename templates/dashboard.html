@@ -95,7 +95,7 @@
                     <div class="port-list">
                         {% for p in data.ports %}
                         <span class="badge {% if p.proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
-                              title="{{ 'UDP' if p.proto == 'udp' else 'TCP' }} {{ p.port }}{% if PORT_SERVICES.get(p.port) %} — {{ PORT_SERVICES[p.port] }}{% endif %}">{{ p.port }}</span>
+                              data-port-tip="{{ 'UDP' if p.proto == 'udp' else 'TCP' }} {{ p.port }}{% if PORT_SERVICES.get(p.port) %} — {{ PORT_SERVICES[p.port] }}{% endif %}">{{ p.port }}</span>
                         {% else %}
                         <span class="text-muted small">нет открытых портов</span>
                         {% endfor %}

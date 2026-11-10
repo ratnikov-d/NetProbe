@@ -292,21 +292,33 @@ th[data-sort]:hover { color: var(--text); }
 .badge { font-weight: 600; border-radius: 999px; padding: .38em .7em; font-size: .74rem; }
 
 .badge-port {
-    background: color-mix(in srgb, var(--ok) 14%, transparent);
-    color: color-mix(in srgb, var(--ok) 70%, var(--text));
-    border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
+    background: rgba(18, 184, 134, .14);
+    color: #0b7a5c;
+    border: 1px solid rgba(18, 184, 134, .38);
     font-variant-numeric: tabular-nums;
     border-radius: 7px;
     padding: 3px 9px;
 }
 
 .badge-port-udp {
-    background: color-mix(in srgb, #a78bfa 16%, transparent);
-    color: color-mix(in srgb, #a78bfa 75%, var(--text));
-    border: 1px solid color-mix(in srgb, #a78bfa 35%, transparent);
+    background: rgba(139, 92, 246, .14);
+    color: #6d28d9;
+    border: 1px solid rgba(139, 92, 246, .38);
     font-variant-numeric: tabular-nums;
     border-radius: 7px;
     padding: 3px 9px;
+}
+
+[data-theme="dark"] .badge-port {
+    background: rgba(45, 212, 160, .16);
+    color: #7dffb2;
+    border-color: rgba(45, 212, 160, .40);
+}
+
+[data-theme="dark"] .badge-port-udp {
+    background: rgba(167, 139, 250, .18);
+    color: #c4b5fd;
+    border-color: rgba(167, 139, 250, .42);
 }
 
 .port-list {
@@ -327,6 +339,28 @@ th[data-sort]:hover { color: var(--text); }
     letter-spacing: .03em;
     opacity: .75;
 }
+
+/* всплывающая подсказка для портов (не обрезается таблицей) */
+.floating-tip {
+    position: fixed;
+    z-index: 3000;
+    max-width: 280px;
+    padding: .45rem .65rem;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    font-size: .76rem;
+    line-height: 1.35;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+
+.floating-tip.is-visible { opacity: 1; transform: none; }
 
 /* подсказка-вопросик рядом с заголовком поля */
 .hint {
