@@ -296,6 +296,8 @@ th[data-sort]:hover { color: var(--text); }
     color: color-mix(in srgb, var(--ok) 70%, var(--text));
     border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent);
     font-variant-numeric: tabular-nums;
+    border-radius: 7px;
+    padding: 3px 9px;
 }
 
 .badge-port-udp {
@@ -303,6 +305,8 @@ th[data-sort]:hover { color: var(--text); }
     color: color-mix(in srgb, #a78bfa 75%, var(--text));
     border: 1px solid color-mix(in srgb, #a78bfa 35%, transparent);
     font-variant-numeric: tabular-nums;
+    border-radius: 7px;
+    padding: 3px 9px;
 }
 
 .port-list {
