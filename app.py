@@ -502,7 +502,7 @@ SETTING_DEFAULTS = {
     'smtp_port': '25',
     'smtp_user': '',
     'smtp_password': '',
-    'smtp_tls': '1',
+    'smtp_tls': '0',
     'smtp_ssl': '0',
     'mail_from': '',
     'mail_to': '',
