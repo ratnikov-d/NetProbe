@@ -1,0 +1,141 @@
+/* Тема оформления + сохранение позиции прокрутки при POST-переходах. */
+(function () {
+    'use strict';
+
+    var THEME_KEY = 'ps.theme';
+    var SCROLL_KEY = 'ps.scroll';
+    var root = document.documentElement;
+
+    function applyTheme(theme) {
+        root.setAttribute('data-theme', theme);
+        var btn = document.getElementById('themeToggle');
+        if (btn) {
+            btn.textContent = theme === 'dark' ? '☀' : '☾';
+            btn.title = theme === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+            btn.setAttribute('aria-label', btn.title);
+        }
+    }
+
+    var saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (e) { /* приватный режим */ }
+    var preferred = saved || (window.matchMedia &&
+        window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    applyTheme(preferred);
+
+    document.addEventListener('click', function (e) {
+        var btn = e.target.closest('#themeToggle');
+        if (!btn) return;
+        var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        try { localStorage.setItem(THEME_KEY, next); } catch (err) { /* ignore */ }
+        applyTheme(next);
+    });
+
+    // --- прокрутка: возвращаемся туда же после отправки формы ---
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (form && form.matches && form.matches('form[data-keep-scroll]')) {
+            try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY)); } catch (err) { /* ignore */ }
+        }
+    }, true);
+
+    window.addEventListener('load', function () {
+        var y = null;
+        try { y = sessionStorage.getItem(SCROLL_KEY); } catch (e) { /* ignore */ }
+        if (y !== null) {
+            try { sessionStorage.removeItem(SCROLL_KEY); } catch (e) { /* ignore */ }
+            window.scrollTo(0, parseInt(y, 10) || 0);
+        }
+    });
+
+    window.keepScrollReload = function () {
+        try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY)); } catch (e) { /* ignore */ }
+        window.location.reload();
+    };
+
+    // ------------------------------------------------- прогресс сканирования
+
+    document.addEventListener('DOMContentLoaded', function () {
+    applyTheme(root.getAttribute('data-theme') || 'light');
+    var line = document.getElementById('scanLine');
+    var chip = document.getElementById('scanChip');
+    if (line && chip) {
+        var wasRunning = false;
+        var stopping = false;
+        var currentJob = null;
+
+        function setText(id, value) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function poll() {
+            fetch('/api/scan/progress')
+                .then(function (r) { return r.json(); })
+                .then(function (p) {
+                    if (!p || !p.log_id) return;
+                    currentJob = p.log_id;
+                    setText('progRange', p.ip_range);
+                    setText('progPct', p.percent + '%');
+                    setText('progDone', p.done);
+                    setText('progTotal', p.total);
+                    setText('progOpened', p.open_found);
+                    var bar = document.getElementById('progBar');
+                    if (bar) bar.style.width = p.percent + '%';
+
+                    var dot = document.getElementById('scanDot');
+                    var stop = document.getElementById('stopBtn');
+
+                    if (p.running) {
+                        wasRunning = true;
+                        line.classList.add('is-active');
+                        chip.classList.add('is-visible');
+                        if (dot) dot.classList.remove('is-done');
+                        if (stop) stop.disabled = stopping;
+                        return;
+                    }
+
+                    if (wasRunning) {
+                        wasRunning = false;
+                        if (dot) dot.classList.add('is-done');
+                        setText('progPct', p.status === 'completed' ? 'готово' :
+                                p.status === 'stopped' ? 'остановлено' : 'прервано');
+                        if (stop) stop.style.display = 'none';
+                        setTimeout(function () {
+                            chip.classList.remove('is-visible');
+                            line.classList.remove('is-active');
+                        }, 1600);
+                        if (window.location.pathname === '/dashboard') {
+                            setTimeout(function () {
+                                if (window.keepScrollReload) window.keepScrollReload();
+                                else window.location.reload();
+                            }, 2000);
+                        }
+                    } else {
+                        line.classList.remove('is-active');
+                        chip.classList.remove('is-visible');
+                    }
+                })
+                .catch(function () {});
+        }
+
+        var stopBtn = document.getElementById('stopBtn');
+        if (stopBtn) {
+            stopBtn.addEventListener('click', function () {
+                if (!currentJob) return;
+                stopping = true;
+                this.disabled = true;
+                fetch('/api/scan/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_id: currentJob })
+                });
+            });
+        }
+
+        poll();
+        setInterval(poll, 1000);
+    }
+    });
+})();

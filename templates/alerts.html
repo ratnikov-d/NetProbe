@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}События - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>События</h2>
+    <span class="small-muted">последние 200 событий</span>
+</div>
+
+<div class="toolbar">
+    <div class="search">
+        <input type="search" class="form-control form-control-sm"
+               placeholder="Поиск по IP, порту, сообщению…" data-search-for="alertsTable">
+    </div>
+    <span class="small-muted ms-auto" data-count-for="alertsTable"></span>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0" id="alertsTable" data-table>
+            <thead>
+                <tr>
+                    <th data-sort="ts">Время <span class="sort-mark"></span></th>
+                    <th data-sort="ip">IP-адрес <span class="sort-mark"></span></th>
+                    <th data-sort="port">Порт <span class="sort-mark"></span></th>
+                    <th>Событие</th>
+                    <th>Сообщение</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for alert in alerts %}
+                <tr data-row
+                    data-ts="{{ alert['timestamp'] }}"
+                    data-ip="{{ alert['ip'] }}"
+                    data-port="{{ alert['port'] }}">
+                    <td class="small-muted nowrap">{{ alert['timestamp'] }}</td>
+                    <td class="mono nowrap">{{ alert['ip'] }}</td>
+                    <td><span class="badge badge-port">{{ alert['port'] }}</span></td>
+                    <td class="nowrap">
+                        {% if alert['action'] == 'opened' %}
+                        <span class="badge bg-success">открыт</span>
+                        {% elif alert['action'] == 'closed' %}
+                        <span class="badge bg-secondary">закрыт</span>
+                        {% else %}
+                        <span class="badge bg-secondary">{{ alert['action'] }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ alert['message'] }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="empty-state">Событий пока нет.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

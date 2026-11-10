@@ -1,0 +1,16 @@
+services:
+  port-scanner:
+    build: .
+    image: port-scanner
+    container_name: port-scanner-web
+    ports:
+      - "5000:5000"
+    volumes:
+      - port_scanner_data:/app/data
+    environment:
+      - SECRET_KEY=change-me-in-production
+      - TZ=Europe/Moscow
+    restart: unless-stopped
+
+volumes:
+  port_scanner_data:

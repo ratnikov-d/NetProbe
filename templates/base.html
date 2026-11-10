@@ -1,0 +1,105 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ title }} - NetProbe{% endblock %}
+
+{% block body %}
+<nav class="navbar navbar-expand app-nav py-2">
+    <div class="container">
+        <a class="navbar-brand flex-shrink-0" href="{{ url_for('index') }}">
+            <img src="{{ url_for('static', filename='logo.svg') }}" alt="" class="brand-logo">
+            <span>NetProbe</span>
+        </a>
+
+        <div class="collapse navbar-collapse show" id="navbarNav">
+            {% if current_user.is_authenticated %}
+            <ul class="navbar-nav me-auto gap-xl-1 main-nav">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
+                       href="{{ url_for('dashboard') }}">Результаты</a>
+                </li>
+                {% if current_user.can_manage %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'quick' %}active{% endif %}"
+                       href="{{ url_for('quick') }}">Разовое сканирование</a>
+                </li>
+                {% endif %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'schedules' %}active{% endif %}"
+                       href="{{ url_for('schedules') }}">Расписание</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint in ('logs', 'log_detail') %}active{% endif %}"
+                       href="{{ url_for('logs') }}">Лог</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'alerts' %}active{% endif %}"
+                       href="{{ url_for('alerts') }}">События</a>
+                </li>
+                {% if current_user.can_manage %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint in ('settings', 'users') %}active{% endif %}"
+                       href="{{ url_for('settings') }}">Настройки</a>
+                </li>
+                {% endif %}
+            </ul>
+            <ul class="navbar-nav align-items-center gap-2 nav-user ms-auto">
+                <li class="nav-item">
+                    <button type="button" class="theme-btn" id="themeToggle" aria-label="Тема">☾</button>
+                </li>
+                <li class="nav-item">
+                    <span class="nav-link user-badge d-flex align-items-center gap-2">
+                        <span class="small-muted">{{ current_user.username }}</span>
+                        <span class="badge bg-secondary">{{ current_user.role_label }}</span>
+                    </span>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('logout') }}">Выход</a>
+                </li>
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+</nav>
+
+<div class="container my-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Закрыть"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</div>
+
+{% if current_user.is_authenticated %}
+<div class="scan-line" id="scanLine"><div class="scan-line__bar" id="progBar"></div></div>
+<div class="scan-chip" id="scanChip">
+    <span class="scan-chip__dot" id="scanDot"></span>
+    <span class="scan-chip__range" id="progRange"></span>
+    <span class="scan-chip__meta">
+        <span id="progPct">0%</span> ·
+        <span id="progDone">0</span>/<span id="progTotal">0</span> ·
+        новых <span id="progOpened">0</span>
+    </span>
+    {% if current_user.can_manage %}
+    <button type="button" class="scan-chip__stop" id="stopBtn">Остановить</button>
+    {% endif %}
+</div>
+{% endif %}
+
+<footer class="app-footer">
+    <div class="container d-flex flex-wrap justify-content-between gap-2">
+        <span>NetProbe</span>
+        <span>
+            <a href="https://example.com" target="_blank" rel="noopener">example.com</a>
+            ·
+            <a href="mailto:dmitriy@example.com">dmitriy@example.com</a>
+        </span>
+    </div>
+</footer>
+{% endblock %}

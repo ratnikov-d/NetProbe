@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+
+{% block title %}Разовое сканирование - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Разовое сканирование</h2>
+    <a href="{{ url_for('schedules') }}" class="btn btn-sm btn-outline-secondary">Перейти в расписание</a>
+</div>
+
+<p class="small-muted mb-3">
+    Проверка «здесь и сейчас»: результаты показываются на этой странице и не попадают
+    в основную таблицу. Отметьте адреса галочками и добавьте их в расписание.
+</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('quick') }}">
+            {{ form.hidden_tag() }}
+            <div class="row g-3">
+                <div class="col-lg-3">
+                    <label class="form-label" for="ip_range">Диапазон IP
+                        <span class="hint" data-tip="Форматы: 192.168.1.1-254, 192.168.1.10-192.168.1.50, 192.168.1.0/24, 10.0.0.0/22.">?</span>
+                    </label>
+                    {{ form.ip_range(class="form-control", placeholder="192.168.1.10 или 192.168.1.0/28") }}
+                </div>
+                <div class="col-lg-4">
+                    <label class="form-label" for="ports">TCP-порты
+                        <span class="hint" data-tip="Через запятую или диапазоном: 22,80,443,8000-8100">?</span>
+                    </label>
+                    {{ form.ports(class="form-control", placeholder=default_ports) }}
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label" for="udp_ports">UDP-порты
+                        <span class="hint" data-tip="Пусто — UDP не проверяется. Открытым считается порт, ответивший на пустой пакет.">?</span>
+                    </label>
+                    {{ form.udp_ports(class="form-control", placeholder=default_udp) }}
+                </div>
+                <div class="col-lg-2">
+                    <label class="form-label" for="workers">Потоков
+                        <span class="hint" data-tip="Одновременных проверок. Больше — быстрее.">?</span>
+                    </label>
+                    {{ form.workers(class="form-control") }}
+                </div>
+            </div>
+            <div class="mt-3 d-flex align-items-center gap-3 flex-wrap">
+                {{ form.submit(class="btn btn-primary", value="Проверить сейчас") }}
+                <span class="small-muted">Максимум 4000 проверок за раз</span>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if job and job.status == 'running' %}
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong>Сканирование {{ job.ip_range }}</strong>
+            <span class="small-muted" id="qText">0 / {{ job.total }}</span>
+        </div>
+        <div class="progress" style="height: 20px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                 id="qBar" style="width: 0%">0%</div>
+        </div>
+        <div class="small-muted mt-2">Порты: {{ job.ports_text }}</div>
+    </div>
+</div>
+{% elif job and job.status == 'failed' %}
+<div class="alert alert-danger">Сканирование не удалось: {{ job.error }}</div>
+{% endif %}
+
+{% if results is not none %}
+<div class="card">
+    <div class="card-header d-flex flex-wrap justify-content-between gap-2">
+        <span>Результаты</span>
+        <span class="small-muted">
+            адресов: {{ summary.ips }} · портов: {{ summary.ports }}
+            · проверок: {{ summary.checks }} · с открытыми: {{ summary.with_open }}
+        </span>
+    </div>
+    <div class="card-body pb-0">
+        <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+            <div class="form-check m-0">
+                <input class="form-check-input" type="checkbox" id="onlyOpenQuick" checked>
+                <label class="form-check-label small" for="onlyOpenQuick">
+                    только с открытыми портами
+                </label>
+            </div>
+            <span class="small-muted" id="quickCount"></span>
+            <button class="btn btn-sm btn-primary ms-auto" id="addSelectedBtn" disabled>
+                Добавить выбранные (<span id="selCount">0</span>)
+            </button>
+        </div>
+        <div id="quickAlert"></div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th style="width: 40px;">
+                        <input class="form-check-input" type="checkbox" id="selectAll"
+                               aria-label="Выбрать все">
+                    </th>
+                    <th>IP-адрес</th>
+                    <th>TCP</th>
+                    <th>UDP</th>
+                    <th class="text-end">В расписание</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr data-count="{{ r.count }}" data-ip="{{ r.ip }}">
+                    <td>
+                        <input class="form-check-input row-check" type="checkbox"
+                               value="{{ r.ip }}" aria-label="Выбрать {{ r.ip }}">
+                    </td>
+                    <td><strong>{{ r.ip }}</strong></td>
+                    <td>
+                        <div class="port-list">
+                            {% for p in r.tcp %}
+                            <span class="badge badge-port"
+                                  title="TCP {{ p }}{% if PORT_SERVICES.get(p) %} — {{ PORT_SERVICES[p] }}{% endif %}">{{ p }}</span>
+                            {% else %}
+                            <span class="small-muted">—</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="port-list">
+                            {% for p in r.udp %}
+                            <span class="badge badge-port-udp">{{ p }}</span>
+                            {% else %}
+                            <span class="small-muted">—</span>
+                            {% endfor %}
+                        </div>
+                    </td>
+                    <td class="text-end">
+                        <button class="btn btn-sm btn-outline-primary add-one"
+                                type="button" data-ip="{{ r.ip }}">Добавить</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="schedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="schedForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Добавить в расписание</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small-muted mb-3">
+                        Адресов: <strong id="modalCount">0</strong>
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="modalPorts">TCP-порты</label>
+                            <input class="form-control" id="modalPorts" name="ports"
+                                   value="{{ job.ports_text }}">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label" for="modalUdp">UDP-порты</label>
+                            <input class="form-control" id="modalUdp" name="udp_ports"
+                                   value="{{ job.udp_text }}">
+                        </div>
+                    </div>
+                    <div class="mb-2 mt-3">
+                        <label class="form-label" for="modalInterval">Интервал, мин</label>
+                        <input class="form-control" id="modalInterval" name="interval"
+                               type="number" min="1" value="60">
+                    </div>
+                    <div class="small-muted" id="modalIpsPreview"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary"
+                            data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var onlyOpen = document.getElementById('onlyOpenQuick');
+    var counter = document.getElementById('quickCount');
+    var selectAll = document.getElementById('selectAll');
+    var addSelected = document.getElementById('addSelectedBtn');
+    var selCount = document.getElementById('selCount');
+    var alertBox = document.getElementById('quickAlert');
+    var modalEl = document.getElementById('schedModal');
+    var modal = null;
+    var form = document.getElementById('schedForm');
+    var modalCount = document.getElementById('modalCount');
+    var modalPreview = document.getElementById('modalIpsPreview');
+    var pending = [];
+
+    var rows = Array.prototype.slice.call(
+        document.querySelectorAll('table tbody tr[data-ip]'));
+
+    function visibleRows() {
+        return rows.filter(function (tr) { return tr.style.display !== 'none'; });
+    }
+
+    function applyFilter() {
+        var shown = 0;
+        rows.forEach(function (tr) {
+            var ok = !onlyOpen.checked || Number(tr.dataset.count) > 0;
+            tr.style.display = ok ? '' : 'none';
+            if (ok) shown += 1;
+        });
+        if (counter) counter.textContent = shown + ' из ' + rows.length;
+        syncSelection();
+    }
+
+    function selected() {
+        return rows.filter(function (tr) {
+            var cb = tr.querySelector('.row-check');
+            return cb && cb.checked && !cb.disabled;
+        }).map(function (tr) { return tr.dataset.ip; });
+    }
+
+    function syncSelection() {
+        var list = selected();
+        if (selCount) selCount.textContent = list.length;
+        if (addSelected) addSelected.disabled = list.length === 0;
+        if (selectAll) {
+            var vis = visibleRows().filter(function (tr) {
+                var cb = tr.querySelector('.row-check');
+                return cb && !cb.disabled;
+            });
+            selectAll.checked = vis.length > 0 && vis.every(function (tr) {
+                return tr.querySelector('.row-check').checked;
+            });
+        }
+    }
+
+    function openModal(ips) {
+        pending = ips;
+        modalCount.textContent = ips.length;
+        modalPreview.textContent = ips.slice(0, 8).join(', ') +
+            (ips.length > 8 ? ' …' : '');
+        if (!modal) modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    }
+
+    rows.forEach(function (tr) {
+        var cb = tr.querySelector('.row-check');
+        if (cb) cb.addEventListener('change', syncSelection);
+        var btn = tr.querySelector('.add-one');
+        if (btn) {
+            btn.addEventListener('click', function () {
+                openModal([tr.dataset.ip]);
+            });
+        }
+    });
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function () {
+            visibleRows().forEach(function (tr) {
+                var cb = tr.querySelector('.row-check');
+                if (cb && !cb.disabled) cb.checked = selectAll.checked;
+            });
+            syncSelection();
+        });
+    }
+
+    if (addSelected) {
+        addSelected.addEventListener('click', function () {
+            var list = selected();
+            if (list.length) openModal(list);
+        });
+    }
+
+    if (onlyOpen) onlyOpen.addEventListener('change', applyFilter);
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var data = new FormData();
+        data.append('ips', pending.join(','));
+        data.append('ports', document.getElementById('modalPorts').value);
+        data.append('udp_ports', document.getElementById('modalUdp').value);
+        data.append('interval', document.getElementById('modalInterval').value);
+
+        fetch('{{ url_for("quick_add_bulk") }}', {
+            method: 'POST',
+            headers: { 'X-Requested-With': 'fetch' },
+            body: data
+        }).then(function (r) { return r.json(); }).then(function (res) {
+            modal.hide();
+            if (res.error) {
+                alertBox.innerHTML = '<div class="alert alert-danger py-2">' +
+                    res.error + '</div>';
+                return;
+            }
+            alertBox.innerHTML = '<div class="alert alert-success py-2">' +
+                'Добавлено: ' + res.added + ', пропущено: ' + res.skipped +
+                '. Порты: ' + res.ports + ', интервал: ' + res.interval + ' мин. ' +
+                'Результаты появятся в «Результатах» через несколько секунд.</div>';
+
+            rows.forEach(function (tr) {
+                if (pending.indexOf(tr.dataset.ip) === -1) return;
+                var cb = tr.querySelector('.row-check');
+                var btn = tr.querySelector('.add-one');
+                if (cb) { cb.checked = false; cb.disabled = true; }
+                if (btn) { btn.disabled = true; btn.textContent = 'добавлен'; }
+            });
+            pending = [];
+            syncSelection();
+        }).catch(function () {
+            alertBox.innerHTML = '<div class="alert alert-danger py-2">' +
+                'Не удалось добавить, попробуйте ещё раз.</div>';
+        });
+    });
+
+    applyFilter();
+})();
+</script>
+{% endif %}
+
+{% if job and job.status == 'running' %}
+<script>
+(function () {
+    var bar = document.getElementById('qBar');
+    var txt = document.getElementById('qText');
+    function poll() {
+        fetch('{{ url_for("quick_status", job_id=job_id) }}')
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (s.status === 'missing') { location.reload(); return; }
+                if (bar) {
+                    bar.style.width = s.percent + '%';
+                    bar.textContent = s.percent + '%';
+                }
+                if (txt) txt.textContent = s.done + ' / ' + s.total;
+                if (s.status !== 'running') location.reload();
+            })
+            .catch(function () {});
+    }
+    poll();
+    setInterval(poll, 700);
+})();
+</script>
+{% endif %}
+{% endblock %}

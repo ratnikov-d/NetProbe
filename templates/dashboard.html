@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}Результаты - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Результаты сканирования</h2>
+</div>
+
+{% if not has_schedules %}
+<div class="alert alert-info">
+    Пока нет ни одного расписания — таблица пуста. Добавьте адрес в
+    <a href="{{ url_for('schedules') }}">разделе «Расписание»</a> или проверьте
+    порты через <a href="{{ url_for('quick') }}">разовое сканирование</a> и добавьте адрес оттуда.
+</div>
+{% endif %}
+
+<details class="card log-card mb-3" id="logCard">
+    <summary>
+        Лог последнего сканирования <span class="small-muted" id="logJob"></span>
+        <a href="{{ url_for('logs') }}" class="ms-auto small">вся история</a>
+    </summary>
+    <pre class="log" id="liveLog" style="max-height: 190px; overflow-y: auto;">загрузка…</pre>
+</details>
+
+<p class="text-muted small">
+    {% if last_scan %}
+    Последний запуск: {{ last_scan['ip_range'] }} &middot; порты: {{ last_scan['ports'] }}
+    &middot; {{ last_scan['start_time'] }}
+    {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time'] }}{% endif %}
+    {% endif %}
+</p>
+
+<!-- фильтры -->
+<div class="row g-2 align-items-center mb-2">
+    <div class="col-md-4">
+        <input id="fIp" class="form-control form-control-sm" placeholder="Фильтр по IP (например 192.168.1.)">
+    </div>
+    <div class="col-md-3">
+        <input id="fPort" class="form-control form-control-sm" placeholder="Фильтр по порту (443)">
+    </div>
+    <div class="col-md-3">
+        <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox" id="fOnlyOpen" checked>
+            <label class="form-check-label small" for="fOnlyOpen">только с открытыми портами</label>
+        </div>
+    </div>
+    <div class="col-md-2 text-end">
+        <span class="text-muted small" id="rowCount"></span>
+    </div>
+</div>
+
+<p class="text-muted small mb-2">
+    Всего адресов: {{ total_hosts }} · с открытыми портами: {{ with_open }}
+</p>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle" id="resultsTable">
+        <thead class="table-dark">
+            <tr>
+                <th data-sort="ip" class="user-select-none" style="cursor: pointer;">
+                    IP-адрес <span class="sort-mark"></span>
+                </th>
+                <th data-sort="pcount" class="user-select-none" style="cursor: pointer;">
+                    Открытые порты <span class="sort-mark"></span>
+                </th>
+                <th data-sort="seen" class="user-select-none" style="cursor: pointer;">
+                    Последняя проверка <span class="sort-mark"></span>
+                </th>
+                <th data-sort="updated" class="user-select-none" style="cursor: pointer;">
+                    Последнее обновление <span class="sort-mark">▼</span>
+                </th>
+                <th class="text-end">Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ip, data in ip_data.items() %}
+            {% set is_paused = ip in paused %}
+            {% set octets = data.ip.split('.') %}
+            <tr data-ip="{{ data.ip }}"
+                data-ipnum="{{ '%03d%03d%03d%03d'|format(octets[0]|int, octets[1]|int, octets[2]|int, octets[3]|int) }}"
+                data-ports="{{ data.ports|map(attribute='port')|join(' ') }}"
+                data-pcount="{{ data.ports|length }}"
+                data-minport="{{ (data.ports|map(attribute='port')|min) if data.ports else 0 }}"
+                data-seen="{{ data.last_seen }}"
+                data-updated="{{ data.updated }}"
+                class="{% if is_paused %}table-secondary{% endif %}">
+                <td>
+                    <strong>{{ data.ip }}</strong>
+                    {% if is_paused %}
+                    <span class="badge bg-warning text-dark ms-1">пауза</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="port-list">
+                        {% for p in data.ports %}
+                        <span class="badge {% if p.proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
+                              title="{{ 'UDP' if p.proto == 'udp' else 'TCP' }} {{ p.port }}{% if PORT_SERVICES.get(p.port) %} — {{ PORT_SERVICES[p.port] }}{% endif %}">{{ p.port }}</span>
+                        {% else %}
+                        <span class="text-muted small">нет открытых портов</span>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td class="text-muted small">{{ data.last_seen }}</td>
+                <td class="text-muted small">{{ data.updated }}</td>
+                <td class="text-end text-nowrap">
+                    <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
+                          class="d-inline" data-keep-scroll>
+                        <button class="btn btn-sm btn-outline-primary" type="submit"
+                                title="Проверить этот адрес сейчас">Проверить</button>
+                    </form>
+                    {% if current_user.can_manage %}
+                    {% if is_paused %}
+                    <form method="POST" action="{{ url_for('ip_resume', ip=data.ip) }}"
+                          class="d-inline" data-keep-scroll>
+                        <button class="btn btn-sm btn-outline-success" type="submit"
+                                title="Возобновить сканирование этого адреса">Возобновить</button>
+                    </form>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('ip_pause', ip=data.ip) }}"
+                          class="d-inline" data-keep-scroll>
+                        <button class="btn btn-sm btn-outline-warning" type="submit"
+                                title="Не сканировать этот адрес">Пауза</button>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="text-center text-muted py-4">
+                    Результатов пока нет. Запустите сканирование.
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<p class="text-muted small">
+    В таблице только открытые порты. Закрытые порты удаляются автоматически,
+    алерт создаётся только при появлении нового открытого порта.
+    Клик по заголовку — сортировка. Адреса на паузе не сканируются автоматически.
+</p>
+
+<script>
+(function () {
+    var lastEventId = 0;
+    var currentLogId = null;
+
+    // ---------------------------------------------------------- лог и прогресс
+    function addLog(events) {
+        if (!events.length) return;
+        var box = document.getElementById('liveLog');
+        if (box.dataset.ready !== '1') { box.textContent = ''; box.dataset.ready = '1'; }
+        events.forEach(function (e) {
+            var mark = e.level === 'opened' ? '● ' :
+                       e.level === 'closed' ? '○ ' :
+                       e.level === 'warning' ? '! ' :
+                       e.level === 'error' ? '✖ ' : '· ';
+            box.textContent += mark + e.timestamp + '  ' + e.message + '\n';
+        });
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function pollEvents() {
+        fetch('{{ url_for("api_events") }}?after=' + lastEventId)
+            .then(function (r) { return r.json(); })
+            .then(function (events) {
+                if (!events.length) return;
+                lastEventId = events[events.length - 1].id;
+                document.getElementById('logJob').textContent =
+                    '· задание #' + events[events.length - 1].log_id;
+                addLog(events);
+            })
+            .catch(function () {});
+    }
+
+    // ------------------------------------------------------------ фильтрация
+    var fIp = document.getElementById('fIp');
+    var fPort = document.getElementById('fPort');
+    var fOnlyOpen = document.getElementById('fOnlyOpen');
+    var tbody = document.querySelector('#resultsTable tbody');
+
+    function rows() {
+        return Array.prototype.slice.call(tbody.querySelectorAll('tr[data-ip]'));
+    }
+
+    function applyFilter() {
+        var ipPart = fIp.value.trim();
+        var portPart = fPort.value.trim();
+        var onlyOpen = fOnlyOpen.checked;
+        var shown = 0;
+        rows().forEach(function (tr) {
+            var ok = true;
+            if (ipPart && tr.dataset.ip.indexOf(ipPart) === -1) ok = false;
+            if (ok && portPart) {
+                var ports = (tr.dataset.ports || '').split(' ').filter(Boolean);
+                ok = ports.indexOf(portPart) !== -1;
+            }
+            if (ok && onlyOpen && Number(tr.dataset.pcount) === 0) ok = false;
+            tr.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        document.getElementById('rowCount').textContent = shown + ' из ' + rows().length;
+    }
+
+    fIp.addEventListener('input', applyFilter);
+    fPort.addEventListener('input', applyFilter);
+    fOnlyOpen.addEventListener('change', applyFilter);
+
+    // -------------------------------------------------------------- сортировка
+    var sortState = { key: 'updated', dir: -1 };
+
+    function sortRows(key) {
+        var dir = (sortState.key === key) ? -sortState.dir : (key === 'pcount' ? -1 : 1);
+        sortState = { key: key, dir: dir };
+        var list = rows();
+        list.sort(function (a, b) {
+            var av, bv;
+            if (key === 'ip') {
+                av = a.dataset.ipnum; bv = b.dataset.ipnum;
+                return av.localeCompare(bv) * dir;
+            }
+            if (key === 'pcount') {
+                var ac = Number(a.dataset.pcount);
+                var bc = Number(b.dataset.pcount);
+                if (ac !== bc) return (ac - bc) * dir;
+                // при равном количестве — по номеру порта (по возрастанию)
+                return Number(a.dataset.minport) - Number(b.dataset.minport);
+            }
+            if (key === 'updated') {
+                av = a.dataset.updated || ''; bv = b.dataset.updated || '';
+                return av.localeCompare(bv) * dir;
+            }
+            av = a.dataset.seen || ''; bv = b.dataset.seen || '';
+            return av.localeCompare(bv) * dir;
+        });
+        list.forEach(function (tr) { tbody.appendChild(tr); });
+        document.querySelectorAll('#resultsTable th[data-sort]').forEach(function (th) {
+            var mark = th.querySelector('.sort-mark');
+            mark.textContent = (th.dataset.sort === key) ? (dir > 0 ? '▲' : '▼') : '';
+        });
+    }
+
+    document.querySelectorAll('#resultsTable th[data-sort]').forEach(function (th) {
+        th.addEventListener('click', function () { sortRows(th.dataset.sort); });
+    });
+
+    applyFilter();
+    pollEvents();
+    setInterval(pollEvents, 1500);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Настройки</h2>
+    {% if current_user.is_admin %}
+    <a href="{{ url_for('users') }}" class="btn btn-sm btn-outline-secondary">Пользователи</a>
+    {% endif %}
+</div>
+
+<form method="POST" action="{{ url_for('settings') }}">
+    <div class="card">
+        <div class="card-header">Уведомления об открытых портах</div>
+        <div class="card-body p-0">
+
+            <details class="channel" {% if cfg.telegram_enabled == '1' %}open{% endif %}>
+                <summary>
+                    <span class="channel__title">Telegram</span>
+                    {% if cfg.telegram_enabled == '1' %}
+                    <span class="badge bg-success">включено</span>
+                    {% else %}
+                    <span class="badge bg-secondary">выключено</span>
+                    {% endif %}
+                </summary>
+                <div class="channel__body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="telegram_enabled" name="telegram_enabled"
+                               {% if cfg.telegram_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="telegram_enabled">Отправлять в Telegram</label>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="telegram_token">Токен бота</label>
+                            <div class="input-group">
+                                <input class="form-control" type="password" autocomplete="off"
+                                       id="telegram_token" name="telegram_token"
+                                       value="{{ cfg.telegram_token }}">
+                                <button class="btn btn-outline-secondary btn-sm" type="button"
+                                        data-reveal="telegram_token">Показать</button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="telegram_chat">Chat ID</label>
+                            <input class="form-control" id="telegram_chat" name="telegram_chat"
+                                   value="{{ cfg.telegram_chat }}">
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap w-100"
+                                    type="submit" formnovalidate
+                                    formaction="{{ url_for('settings_test', channel='telegram') }}">
+                                Проверить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="channel" {% if cfg.max_enabled == '1' %}open{% endif %}>
+                <summary>
+                    <span class="channel__title">MAX</span>
+                    {% if cfg.max_enabled == '1' %}
+                    <span class="badge bg-success">включено</span>
+                    {% else %}
+                    <span class="badge bg-secondary">выключено</span>
+                    {% endif %}
+                </summary>
+                <div class="channel__body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="max_enabled" name="max_enabled"
+                               {% if cfg.max_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="max_enabled">Отправлять в MAX</label>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label" for="max_token">Токен бота</label>
+                            <div class="input-group">
+                                <input class="form-control" type="password" autocomplete="off"
+                                       id="max_token" name="max_token" value="{{ cfg.max_token }}">
+                                <button class="btn btn-outline-secondary btn-sm" type="button"
+                                        data-reveal="max_token">Показать</button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="max_chat">Chat ID</label>
+                            <input class="form-control" id="max_chat" name="max_chat"
+                                   value="{{ cfg.max_chat }}">
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap w-100"
+                                    type="submit" formnovalidate
+                                    formaction="{{ url_for('settings_test', channel='max') }}">
+                                Проверить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="channel" {% if cfg.email_enabled == '1' %}open{% endif %}>
+                <summary>
+                    <span class="channel__title">E-mail</span>
+                    {% if cfg.email_enabled == '1' %}
+                    <span class="badge bg-success">включено</span>
+                    {% else %}
+                    <span class="badge bg-secondary">выключено</span>
+                    {% endif %}
+                </summary>
+                <div class="channel__body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="email_enabled" name="email_enabled"
+                               {% if cfg.email_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="email_enabled">Отправлять на e-mail</label>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-5">
+                            <label class="form-label" for="smtp_host">SMTP-сервер</label>
+                            <input class="form-control" id="smtp_host" name="smtp_host"
+                                   value="{{ cfg.smtp_host }}" placeholder="smtp.example.com">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="smtp_port">Порт</label>
+                            <input class="form-control" id="smtp_port" name="smtp_port"
+                                   value="{{ cfg.smtp_port }}">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label" for="mail_to">Кому (через запятую)</label>
+                            <input class="form-control" id="mail_to" name="mail_to"
+                                   value="{{ cfg.mail_to }}" placeholder="admin@example.com">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label" for="smtp_user">Логин SMTP</label>
+                            <input class="form-control" id="smtp_user" name="smtp_user"
+                                   value="{{ cfg.smtp_user }}" autocomplete="off">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label" for="smtp_password">Пароль SMTP</label>
+                            <div class="input-group">
+                                <input class="form-control" type="password" autocomplete="off"
+                                       id="smtp_password" name="smtp_password"
+                                       value="{{ cfg.smtp_password }}">
+                                <button class="btn btn-outline-secondary btn-sm" type="button"
+                                        data-reveal="smtp_password">Показать</button>
+                            </div>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap w-100"
+                                    type="submit" formnovalidate
+                                    formaction="{{ url_for('settings_test', channel='email') }}">
+                                Проверить
+                            </button>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label" for="mail_from">Отправитель (From)</label>
+                            <input class="form-control" id="mail_from" name="mail_from"
+                                   value="{{ cfg.mail_from }}" placeholder="scanner@example.com">
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-4">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                       id="smtp_tls" name="smtp_tls"
+                                       {% if cfg.smtp_tls == '1' %}checked{% endif %}>
+                                <label class="form-check-label" for="smtp_tls">STARTTLS</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="form-check form-switch mt-4">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                       id="smtp_ssl" name="smtp_ssl"
+                                       {% if cfg.smtp_ssl == '1' %}checked{% endif %}>
+                                <label class="form-check-label" for="smtp_ssl">SSL</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            <details class="channel" {% if cfg.zabbix_enabled == '1' %}open{% endif %}>
+                <summary>
+                    <span class="channel__title">Zabbix</span>
+                    {% if cfg.zabbix_enabled == '1' %}
+                    <span class="badge bg-success">включено</span>
+                    {% else %}
+                    <span class="badge bg-secondary">выключено</span>
+                    {% endif %}
+                </summary>
+                <div class="channel__body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="zabbix_enabled" name="zabbix_enabled"
+                               {% if cfg.zabbix_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="zabbix_enabled">Отправлять в Zabbix</label>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label" for="zabbix_server">Сервер</label>
+                            <input class="form-control" id="zabbix_server" name="zabbix_server"
+                                   value="{{ cfg.zabbix_server }}" placeholder="zabbix.local">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="zabbix_port">Порт</label>
+                            <input class="form-control" id="zabbix_port" name="zabbix_port"
+                                   value="{{ cfg.zabbix_port }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label" for="zabbix_host">Хост в Zabbix</label>
+                            <input class="form-control" id="zabbix_host" name="zabbix_host"
+                                   value="{{ cfg.zabbix_host }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="zabbix_key">Ключ</label>
+                            <input class="form-control" id="zabbix_key" name="zabbix_key"
+                                   value="{{ cfg.zabbix_key }}">
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap w-100"
+                                    type="submit" formnovalidate
+                                    formaction="{{ url_for('settings_test', channel='zabbix') }}">
+                                Проверить
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-text mt-2">Zabbix sender, порт 10051, элемент данных типа trapper.</div>
+                </div>
+            </details>
+
+            <details class="channel" {% if cfg.syslog_enabled == '1' %}open{% endif %}>
+                <summary>
+                    <span class="channel__title">Syslog</span>
+                    {% if cfg.syslog_enabled == '1' %}
+                    <span class="badge bg-success">включено</span>
+                    {% else %}
+                    <span class="badge bg-secondary">выключено</span>
+                    {% endif %}
+                </summary>
+                <div class="channel__body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="syslog_enabled" name="syslog_enabled"
+                               {% if cfg.syslog_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="syslog_enabled">Отправлять в Syslog</label>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label" for="syslog_host">Сервер</label>
+                            <input class="form-control" id="syslog_host" name="syslog_host"
+                                   value="{{ cfg.syslog_host }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="syslog_port">Порт</label>
+                            <input class="form-control" id="syslog_port" name="syslog_port"
+                                   value="{{ cfg.syslog_port }}">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label" for="syslog_proto">Протокол</label>
+                            <select class="form-select" id="syslog_proto" name="syslog_proto">
+                                <option value="udp" {% if cfg.syslog_proto == 'udp' %}selected{% endif %}>UDP</option>
+                                <option value="tcp" {% if cfg.syslog_proto == 'tcp' %}selected{% endif %}>TCP</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm text-nowrap w-100"
+                                    type="submit" formnovalidate
+                                    formaction="{{ url_for('settings_test', channel='syslog') }}">
+                                Проверить
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+        </div>
+    </div>
+
+    <div class="mt-3 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Сохранить настройки</button>
+        <span class="small-muted align-self-center">
+            «Проверить» сохраняет поля и отправляет тестовое сообщение.
+        </span>
+    </div>
+</form>
+
+<script>
+(function () {
+    document.querySelectorAll('[data-reveal]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.dataset.reveal);
+            if (!input) return;
+            var hidden = input.type === 'password';
+            input.type = hidden ? 'text' : 'password';
+            btn.textContent = hidden ? 'Скрыть' : 'Показать';
+        });
+    });
+
+    var ssl = document.getElementById('smtp_ssl');
+    var tls = document.getElementById('smtp_tls');
+    var port = document.getElementById('smtp_port');
+
+    function syncPort() {
+        if (!ssl || !tls || !port) return;
+        var value = port.value.trim();
+        if (ssl.checked) {
+            if (value === '' || value === '25' || value === '587') port.value = '465';
+        } else if (tls.checked) {
+            if (value === '' || value === '25' || value === '465') port.value = '587';
+        } else if (value === '465' || value === '587') {
+            port.value = '25';
+        }
+    }
+
+    if (ssl) {
+        ssl.addEventListener('change', function () {
+            if (ssl.checked && tls) tls.checked = false;
+            syncPort();
+        });
+    }
+    if (tls) {
+        tls.addEventListener('change', function () {
+            if (tls.checked && ssl) ssl.checked = false;
+            syncPort();
+        });
+    }
+})();
+</script>
+{% endblock %}

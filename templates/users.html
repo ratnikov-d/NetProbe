@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Пользователи - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Пользователи</h2>
+    <a href="{{ url_for('settings') }}" class="btn btn-sm btn-outline-secondary">← Настройки</a>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header py-2">Добавить пользователя</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('users') }}">
+            {{ form.hidden_tag() }}
+            <div class="row g-3">
+                <div class="col-md-3">
+                    {{ form.username.label(class="form-label") }}
+                    {{ form.username(class="form-control", placeholder="ivanov") }}
+                </div>
+                <div class="col-md-3">
+                    {{ form.password.label(class="form-label") }}
+                    {{ form.password(class="form-control", type="password", placeholder="не короче 6 символов") }}
+                </div>
+                <div class="col-md-3">
+                    {{ form.role.label(class="form-label") }}
+                    {{ form.role(class="form-select") }}
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    {{ form.submit(class="btn btn-primary w-100") }}
+                </div>
+            </div>
+        </form>
+        <p class="text-muted small mb-0 mt-3">
+            Администратор — полный доступ. Специалист ИБ — всё, кроме управления
+            администраторами. Пользователь — просмотр и проверка отдельного IP.
+        </p>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-striped align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>#</th>
+                <th>Логин</th>
+                <th>Роль</th>
+                <th>Создан</th>
+                <th>Последний вход</th>
+                <th class="text-end">Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+            <tr>
+                <td>{{ u['id'] }}</td>
+                <td>
+                    <strong>{{ u['username'] }}</strong>
+                    {% if u['id'] == current_user.id %}
+                    <span class="badge bg-info text-dark ms-1">это вы</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if u['role'] == ROLE_ADMIN %}
+                    <span class="badge bg-danger">Администратор</span>
+                    {% elif u['role'] == ROLE_SECURITY %}
+                    <span class="badge bg-primary">Специалист ИБ</span>
+                    {% else %}
+                    <span class="badge bg-secondary">Пользователь</span>
+                    {% endif %}
+                </td>
+                <td class="small text-muted">{{ u['created_at'] or '—' }}</td>
+                <td class="small text-muted">{{ u['last_login'] or 'ещё не входил' }}</td>
+                <td class="text-end text-nowrap">
+                    {% if u['role'] == ROLE_ADMIN and not current_user.is_admin %}
+                    <span class="text-muted small me-2">роль меняет только администратор</span>
+                    {% else %}
+                    <form method="POST" action="{{ url_for('user_role', user_id=u['id']) }}"
+                          class="d-inline-flex gap-1 align-items-center">
+                        <select name="role" class="form-select form-select-sm" style="width: auto;">
+                            {% for value, label in ROLE_LABELS.items() %}
+                            {% if value != ROLE_ADMIN or current_user.is_admin %}
+                            <option value="{{ value }}" {% if value == u['role'] %}selected{% endif %}>{{ label }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-sm btn-outline-primary" type="submit">
+                            Сменить роль
+                        </button>
+                    </form>
+                    {% endif %}
+                    <form method="POST" action="{{ url_for('user_password', user_id=u['id']) }}"
+                          class="d-inline-flex gap-1 align-items-center ms-2">
+                        <input type="password" name="password" class="form-control form-control-sm"
+                               placeholder="новый пароль" style="width: 130px;">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit"
+                                {% if u['role'] == ROLE_ADMIN and not current_user.is_admin %}disabled{% endif %}>
+                            Сбросить пароль
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('user_delete', user_id=u['id']) }}" class="d-inline"
+                          onsubmit="return confirm('Удалить пользователя {{ u['username'] }}?');">
+                        <button class="btn btn-sm btn-outline-danger" type="submit"
+                                {% if u['id'] == current_user.id or (u['role'] == ROLE_ADMIN and not current_user.is_admin) %}disabled{% endif %}>
+                            Удалить
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

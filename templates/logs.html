@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Лог сканирования - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>История сканирований</h2>
+    {% if current_user.can_manage %}
+    {% if current_user.can_manage %}
+    <a href="{{ url_for('quick') }}" class="btn btn-sm btn-primary">Разовое сканирование</a>
+    {% endif %}
+    {% endif %}
+</div>
+
+<div class="toolbar">
+    <div class="search">
+        <input type="search" class="form-control form-control-sm"
+               placeholder="Поиск по диапазону, портам, статусу…" data-search-for="logsTable">
+    </div>
+    <span class="small-muted ms-auto" data-count-for="logsTable"></span>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0" id="logsTable" data-table>
+            <thead>
+                <tr>
+                    <th data-sort="range">Диапазон <span class="sort-mark"></span></th>
+                    <th data-sort="ports">Порты <span class="sort-mark"></span></th>
+                    <th data-sort="status">Статус <span class="sort-mark"></span></th>
+                    <th data-sort="progress" style="min-width: 150px;">Прогресс <span class="sort-mark"></span></th>
+                    <th data-sort="open">Новых портов <span class="sort-mark"></span></th>
+                    <th data-sort="start">Начало <span class="sort-mark"></span></th>
+                    <th data-sort="end">Конец <span class="sort-mark"></span></th>
+                    <th class="text-end">Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in logs %}
+                {% set total = job['total'] or 0 %}
+                {% set done = job['done'] or 0 %}
+                {% set percent = (done * 100 / total) if total else 0 %}
+                <tr data-row
+                    data-log-id="{{ job['id'] }}"
+                    data-range="{{ job['ip_range'] }}"
+                    data-ports="{{ job['ports'] }}"
+                    data-status="{{ job['status'] }}"
+                    data-progress="{{ '%.1f'|format(percent) }}"
+                    data-open="{{ job['open_found'] or 0 }}"
+                    data-start="{{ job['start_time'] or '' }}"
+                    data-end="{{ job['end_time'] or '' }}">
+                    <td>
+                        <div class="mono nowrap">{{ job['ip_range'] }}</div>
+                        <div class="small-muted">
+                            {% if job['schedule_id'] %}расписание #{{ job['schedule_id'] }}{% else %}вручную{% endif %}
+                            · #{{ job['id'] }}
+                        </div>
+                    </td>
+                    <td class="mono small-muted" style="min-width: 220px;">
+                        <div><span class="badge badge-port me-1">TCP</span>{{ job['ports'] }}</div>
+                        {% if job['udp_ports'] %}
+                        <div class="mt-1"><span class="badge badge-port-udp me-1">UDP</span>{{ job['udp_ports'] }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="nowrap">
+                        {% if job['status'] == 'running' %}
+                        <span class="badge bg-warning text-dark">выполняется</span>
+                        {% elif job['status'] == 'completed' %}
+                        <span class="badge bg-success">завершено</span>
+                        {% elif job['status'] == 'stopped' %}
+                        <span class="badge bg-secondary">остановлено</span>
+                        {% else %}
+                        <span class="badge bg-danger">{{ job['status']|status_ru }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="progress" style="height: 14px;">
+                            <div class="progress-bar {% if job['status'] == 'completed' %}bg-success{% elif job['status'] == 'running' %}bg-warning{% else %}bg-secondary{% endif %}"
+                                 id="bar-{{ job['id'] }}"
+                                 style="width: {{ '%.1f'|format(percent) }}%"></div>
+                        </div>
+                        <span class="small-muted" id="prog-{{ job['id'] }}">{{ done }} / {{ total }}</span>
+                    </td>
+                    <td class="nowrap">{{ job['open_found'] or 0 }}</td>
+                    <td class="small-muted nowrap">{{ job['start_time'] }}</td>
+                    <td class="small-muted nowrap">{{ job['end_time'] or '—' }}</td>
+                    <td class="text-end nowrap">
+                        <div class="d-inline-flex gap-1">
+                            <a href="{{ url_for('log_detail', log_id=job['id']) }}"
+                               class="btn btn-sm btn-outline-secondary">Лог</a>
+                            {% if job['status'] == 'running' and current_user.can_manage %}
+                            <form method="POST" action="{{ url_for('stop_scan_form', log_id=job['id']) }}">
+                                <button class="btn btn-sm btn-outline-danger" type="submit">Стоп</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="empty-state">Сканирований ещё не было.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+(function () {
+    var running = Array.prototype.slice.call(
+        document.querySelectorAll('tr[data-row][data-status="running"]'));
+    if (!running.length) return;
+
+    var timer = setInterval(poll, 1500);
+
+    function poll() {
+        running.forEach(function (tr) {
+            var id = tr.dataset.logId;
+            if (!id) return;
+            fetch('{{ url_for("api_progress") }}?log_id=' + id)
+                .then(function (r) { return r.json(); })
+                .then(function (p) {
+                    if (!p || !p.log_id) return;
+                    if (p.status === 'running') {
+                        var bar = document.getElementById('bar-' + id);
+                        var lbl = document.getElementById('prog-' + id);
+                        if (bar) bar.style.width = p.percent + '%';
+                        if (lbl) lbl.textContent = p.done + ' / ' + p.total;
+                    } else {
+                        clearInterval(timer);
+                        if (window.keepScrollReload) window.keepScrollReload();
+                        else location.reload();
+                    }
+                })
+                .catch(function () {});
+        });
+    }
+
+    poll();
+})();
+</script>
+{% endblock %}
