@@ -60,6 +60,17 @@ docker run -d -p 5000:5000 --name port-scanner-web \
 
 Или `docker compose up -d --build`.
 
+Порт по умолчанию 5000. Изменить: создайте `.env` из `.env.example` и укажите `APP_PORT=8080`.
+
+## Если контейнер не поднимается
+
+1. Проверьте версии: `docker --version` и `docker compose version` (нужен Compose v2).
+2. Порт занят: `ss -ltnp | grep :5000` → запустите на другом порту: `APP_PORT=8080 docker compose up -d`.
+3. «permission denied» на docker socket: `sudo usermod -aG docker $USER`, затем перелогиниться.
+4. Смотрите причину: `docker compose logs --tail=100`.
+5. Пересоберите без кэша: `docker compose build --no-cache && docker compose up -d`.
+6. Конфликт старого контейнера: `docker compose down --remove-orphans`.
+
 Первый вход: `admin / admin123` — смените пароль в разделе «Пользователи».
 
 ## Переменные окружения

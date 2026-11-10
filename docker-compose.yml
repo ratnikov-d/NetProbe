@@ -2,15 +2,20 @@ services:
   port-scanner:
     build: .
     image: port-scanner
-    container_name: port-scanner-web
     ports:
-      - "5000:5000"
+      - "${APP_PORT:-5000}:5000"
     volumes:
       - port_scanner_data:/app/data
     environment:
-      - SECRET_KEY=change-me-in-production
-      - TZ=Europe/Moscow
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - TZ=${TZ:-Europe/Moscow}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/login', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   port_scanner_data:
