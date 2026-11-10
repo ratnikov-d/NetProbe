@@ -20,19 +20,27 @@
             <div class="row g-3">
                 <div class="col-lg-3">
                     <label class="form-label" for="ip_range">Диапазон IP
-                        <span class="hint" data-tip="Форматы: 192.168.1.1-254, 192.168.1.10-192.168.1.50, 192.168.1.0/24, 10.0.0.0/22.">?</span>
+                        <span class="hint" data-tip="Форматы:
+192.168.1.1-254
+192.168.1.10-192.168.1.50
+192.168.1.0/24
+10.0.0.0/22">?</span>
                     </label>
                     {{ form.ip_range(class="form-control", placeholder="192.168.1.10 или 192.168.1.0/28") }}
                 </div>
                 <div class="col-lg-4">
                     <label class="form-label" for="ports">TCP-порты
-                        <span class="hint" data-tip="Через запятую или диапазоном: 22,80,443,8000-8100">?</span>
+                        <span class="hint" data-tip="Через запятую или диапазоном:
+22,80,443
+8000-8100">?</span>
                     </label>
                     {{ form.ports(class="form-control", placeholder=default_ports) }}
                 </div>
                 <div class="col-lg-3">
                     <label class="form-label" for="udp_ports">UDP-порты
-                        <span class="hint" data-tip="Пусто — UDP не проверяется. Открытым считается порт, ответивший на пустой пакет.">?</span>
+                        <span class="hint" data-tip="Через запятую или диапазоном:
+53,123,161
+Пусто — UDP не проверяется.">?</span>
                     </label>
                     {{ form.udp_ports(class="form-control", placeholder=default_udp) }}
                 </div>

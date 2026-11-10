@@ -308,6 +308,7 @@ th[data-sort]:hover { color: var(--text); }
 .port-list {
     display: flex;
     flex-wrap: wrap;
+    align-items: flex-start;
     gap: 4px;
     max-width: 420px;
 }
@@ -360,9 +361,9 @@ th[data-sort]:hover { color: var(--text); }
     box-shadow: var(--shadow);
     font-size: .75rem;
     font-weight: 400;
-    line-height: 1.4;
+    line-height: 1.45;
     text-align: left;
-    white-space: normal;
+    white-space: pre-line;
     overflow-wrap: break-word;
     opacity: 0;
     pointer-events: none;
