@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Настройки — группы - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Настройки</h2>
+</div>
+
+{% set settings_tab = 'groups' %}
+{% include "_settings_tabs.html" %}
+
+<div class="card">
+    <div class="card-header d-flex align-items-center gap-2 flex-wrap">
+        <span>Группы адресов</span>
+        <button class="btn btn-sm btn-primary ms-auto" type="button" id="addGroupBtn">
+            + Новая группа
+        </button>
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">Название задаётся вручную.</p>
+
+        <ul class="list-group group-list" id="groupList">
+            {% for g in groups %}
+            <li class="list-group-item d-flex align-items-center gap-2" data-gid="{{ g.id }}">
+                <span class="group-badge badge">{{ g.name }}</span>
+                <span class="small-muted">адресов: {{ g.hosts }}</span>
+                <button class="btn btn-sm btn-outline-secondary ms-auto rename-group"
+                        type="button" data-gid="{{ g.id }}" data-name="{{ g.name }}">Переименовать</button>
+                <button class="btn btn-sm btn-outline-danger del-group"
+                        type="button" data-gid="{{ g.id }}" data-name="{{ g.name }}">Удалить</button>
+            </li>
+            {% else %}
+            <li class="list-group-item empty-groups text-muted small">Групп пока нет.</li>
+            {% endfor %}
+        </ul>
+
+        <p class="small text-muted mt-3 mb-0">
+            Группа назначается адресу в разделе
+            <a href="{{ url_for('dashboard') }}">«Результаты»</a>.
+            Удаление группы не удаляет адреса — они остаются без группы.
+        </p>
+    </div>
+</div>
+
+<div class="modal fade" id="groupFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="groupForm" autocomplete="off">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новая группа</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label small" for="groupName">Название группы</label>
+                    <input id="groupName" class="form-control" maxlength="40" required
+                           placeholder="например: web, почта, АРМ бухгалтерии">
+                    <div class="form-text">Так адрес будет подписан в таблице результатов.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Создать</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var createUrl = '{{ url_for("api_group_create") }}';
+    var renameUrl = '{{ url_for("api_group_rename", group_id=999999) }}';
+    var deleteUrl = '{{ url_for("api_group_delete", group_id=999999) }}';
+
+    var modalEl = document.getElementById('groupFormModal');
+    var modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+    var form = document.getElementById('groupForm');
+    var input = document.getElementById('groupName');
+    var title = modalEl.querySelector('.modal-title');
+    var submitBtn = modalEl.querySelector('button[type="submit"]');
+    var list = document.getElementById('groupList');
+    var editingId = null;
+
+    function openForm(group) {
+        editingId = group ? group.id : null;
+        title.textContent = group ? 'Переименовать группу' : 'Новая группа';
+        submitBtn.textContent = group ? 'Сохранить' : 'Создать';
+        input.value = group ? group.name : '';
+        if (modal) modal.show();
+    }
+
+    modalEl.addEventListener('shown.bs.modal', function () {
+        input.focus();
+        input.select();
+    });
+
+    function makeRow(group, hosts) {
+        var empty = list.querySelector('.empty-groups');
+        if (empty) empty.remove();
+        var li = document.createElement('li');
+        li.className = 'list-group-item d-flex align-items-center gap-2';
+        li.dataset.gid = group.id;
+        li.innerHTML =
+            '<span class="group-badge badge"></span>' +
+            '<span class="small-muted"></span>' +
+            '<button class="btn btn-sm btn-outline-secondary ms-auto rename-group" type="button">Переименовать</button>' +
+            '<button class="btn btn-sm btn-outline-danger del-group" type="button">Удалить</button>';
+        li.querySelector('.group-badge').textContent = group.name;
+        li.querySelector('.small-muted').textContent = 'адресов: ' + (hosts || 0);
+        var renameBtn = li.querySelector('.rename-group');
+        renameBtn.dataset.gid = group.id;
+        renameBtn.dataset.name = group.name;
+        var delBtn = li.querySelector('.del-group');
+        delBtn.dataset.gid = group.id;
+        delBtn.dataset.name = group.name;
+        bindRename(renameBtn);
+        bindDelete(delBtn);
+        list.appendChild(li);
+    }
+
+    function bindRename(btn) {
+        btn.addEventListener('click', function () {
+            openForm({ id: Number(btn.dataset.gid), name: btn.dataset.name || '' });
+        });
+    }
+
+    function bindDelete(btn) {
+        btn.addEventListener('click', function () {
+            var gid = btn.dataset.gid;
+            var name = btn.dataset.name || '';
+            if (!confirm('Удалить группу «' + name + '»? Адреса останутся, но без группы.')) return;
+            fetch(deleteUrl.replace('999999', gid), { method: 'DELETE' })
+                .then(function (r) { return r.json(); })
+                .then(function () {
+                    var li = list.querySelector('li[data-gid="' + gid + '"]');
+                    if (li) li.remove();
+                    if (!list.querySelector('li[data-gid]')) {
+                        var emptyLi = document.createElement('li');
+                        emptyLi.className = 'list-group-item empty-groups text-muted small';
+                        emptyLi.textContent = 'Групп пока нет.';
+                        list.appendChild(emptyLi);
+                    }
+                })
+                .catch(function () { alert('нет связи с сервером'); });
+        });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var name = input.value.trim();
+        if (!name) return;
+        var isEdit = editingId !== null;
+        var url = isEdit ? renameUrl.replace('999999', editingId) : createUrl;
+        fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        }).then(function (r) { return r.json(); }).then(function (g) {
+            if (g.error) { alert(g.error); input.select(); return; }
+            if (isEdit) {
+                var li = list.querySelector('li[data-gid="' + editingId + '"]');
+                if (li) {
+                    li.querySelector('.group-badge').textContent = g.name;
+                    var rb = li.querySelector('.rename-group');
+                    if (rb) rb.dataset.name = g.name;
+                }
+            } else {
+                var existing = list.querySelector('li[data-gid="' + g.id + '"]');
+                if (existing) {
+                    alert('Группа «' + g.name + '» уже есть.');
+                    input.select();
+                    return;
+                }
+                makeRow(g, 0);
+            }
+            if (modal) modal.hide();
+        }).catch(function () { alert('нет связи с сервером'); });
+    });
+
+    document.getElementById('addGroupBtn').addEventListener('click', function () { openForm(null); });
+    list.querySelectorAll('.rename-group').forEach(bindRename);
+    list.querySelectorAll('.del-group').forEach(bindDelete);
+})();
+</script>
+{% endblock %}

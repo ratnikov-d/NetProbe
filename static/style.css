@@ -570,6 +570,35 @@ th[data-sort]:hover { color: var(--text); }
 }
 .group-list .list-group-item:hover { background: color-mix(in srgb, var(--text) 5%, var(--surface-2)); }
 
+.group-list .empty-groups { padding-left: 1.15rem; }
+
+/* вкладки внутри настроек */
+.settings-tabs { gap: .35rem; }
+
+.settings-tabs .nav-link {
+    border-radius: 999px;
+    padding: .32rem .9rem;
+    font-size: .86rem;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+}
+
+.settings-tabs .nav-link:hover { color: var(--text); border-color: var(--muted); }
+
+.settings-tabs .nav-link.active {
+    background: rgba(76, 110, 245, .14);
+    border-color: rgba(76, 110, 245, .45);
+    color: var(--text);
+    font-weight: 600;
+}
+
+[data-theme="dark"] .settings-tabs .nav-link.active {
+    background: rgba(124, 156, 255, .18);
+    border-color: rgba(124, 156, 255, .5);
+    color: #e7ecf6;
+}
+
 .toolbar {
     display: flex;
     flex-wrap: wrap;

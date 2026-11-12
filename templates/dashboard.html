@@ -6,8 +6,7 @@
 <div class="page-head">
     <h2>Результаты сканирования</h2>
     {% if current_user.can_manage %}
-    <button class="btn btn-sm btn-outline-secondary" type="button"
-            data-bs-toggle="modal" data-bs-target="#groupsModal">Группы</button>
+    <a href="{{ url_for('settings_groups') }}" class="btn btn-sm btn-outline-secondary">Группы</a>
     {% endif %}
 </div>
 
@@ -121,7 +120,6 @@
                         {% for g in groups %}
                         <option value="{{ g.id }}" {% if data.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
                         {% endfor %}
-                        <option value="__new">+ создать группу…</option>
                     </select>
                     {% else %}
                     {% if data.group %}
@@ -135,7 +133,6 @@
                     {% if current_user.can_manage %}
                     <input class="form-control form-control-sm comment-input"
                            value="{{ data.comment }}" maxlength="500"
-                           placeholder="что на IP расположено"
                            aria-label="Комментарий для {{ data.ip }}">
                     {% else %}
                     {{ data.comment or '—' }}
@@ -193,68 +190,6 @@
     Клик по заголовку — сортировка. Адреса на паузе не сканируются автоматически.
     Группа и комментарий сохраняются сразу после изменения.
 </p>
-
-{% if current_user.can_manage %}
-<div class="modal fade" id="groupsModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Группы адресов</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <div class="modal-body">
-                <p class="small text-muted mb-2">
-                    Названия задаются вручную: web, почтовые серверы, АРМ бухгалтерии и т. п.
-                    Удаление группы не удаляет адреса — они просто остаются без группы.
-                </p>
-                <div class="d-flex align-items-center gap-2 mb-3">
-                    <button class="btn btn-sm btn-primary" type="button" id="addGroupBtn">
-                        + Новая группа
-                    </button>
-                    <span class="small text-muted">название задаётся вручную</span>
-                </div>
-                <ul class="list-group group-list" id="groupList">
-                    {% for g in groups %}
-                    <li class="list-group-item d-flex align-items-center gap-2" data-gid="{{ g.id }}">
-                        <span class="group-badge badge">{{ g.name }}</span>
-                        <button class="btn btn-sm btn-outline-danger ms-auto del-group"
-                                type="button" data-gid="{{ g.id }}" data-name="{{ g.name }}">Удалить</button>
-                    </li>
-                    {% else %}
-                    <li class="list-group-item px-0 text-muted small">Групп пока нет.</li>
-                    {% endfor %}
-                </ul>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="newGroupModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <form id="newGroupForm" autocomplete="off">
-                <div class="modal-header">
-                    <h5 class="modal-title">Новая группа</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-                </div>
-                <div class="modal-body">
-                    <label class="form-label small" for="newGroupName">Название группы</label>
-                    <input id="newGroupName" class="form-control" maxlength="40" required
-                           placeholder="например: web, почта, АРМ бухгалтерии">
-                    <div class="form-text">
-                        Так адрес будет подписан в таблице результатов. Название можно менять,
-                        удалив группу и создав новую.
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="submit" class="btn btn-primary">Создать</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-{% endif %}
 
 <script>
 (function () {
@@ -336,8 +271,6 @@
 
     // -------------------------------------------------------- группа и комментарий
     var canManage = {{ 'true' if current_user.can_manage else 'false' }};
-    var groupDeleteUrl = '{{ url_for("api_group_delete", group_id=999999) }}';
-    var groupRenameUrl = '{{ url_for("api_group_rename", group_id=999999) }}';
 
     function saveMeta(ip, payload) {
         var body = { ip: ip };
@@ -351,200 +284,11 @@
         });
     }
 
-    function addGroupOption(group) {
-        var value = String(group.id);
-        if (fGroup && !fGroup.querySelector('option[value="' + value + '"]')) {
-            fGroup.add(new Option(group.name, value));
-        }
-        document.querySelectorAll('.group-select').forEach(function (sel) {
-            if (sel.querySelector('option[value="' + value + '"]')) return;
-            var newOpt = sel.querySelector('option[value="__new"]');
-            var opt = new Option(group.name, value);
-            if (newOpt) sel.insertBefore(opt, newOpt); else sel.add(opt);
-        });
-    }
-
-    function createGroup(name) {
-        return fetch('{{ url_for("api_group_create") }}', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name })
-        }).then(function (r) { return r.json(); });
-    }
-
     if (canManage) {
-        var groupList = document.getElementById('groupList');
-        var newGroupModalEl = document.getElementById('newGroupModal');
-        var newGroupModal = newGroupModalEl ? new bootstrap.Modal(newGroupModalEl) : null;
-        var newGroupForm = document.getElementById('newGroupForm');
-        var newGroupInput = document.getElementById('newGroupName');
-        var newGroupTitle = newGroupModalEl ? newGroupModalEl.querySelector('.modal-title') : null;
-        var newGroupSubmit = newGroupModalEl ? newGroupModalEl.querySelector('button[type="submit"]') : null;
-        var onGroupCreated = null;
-        var editingGroupId = null;
-
-        function openGroupForm(group, cb) {
-            onGroupCreated = cb || null;
-            editingGroupId = group ? group.id : null;
-            if (!newGroupModal) return;
-            if (newGroupTitle) newGroupTitle.textContent = group ? 'Переименовать группу' : 'Новая группа';
-            if (newGroupSubmit) newGroupSubmit.textContent = group ? 'Сохранить' : 'Создать';
-            if (newGroupInput) {
-                newGroupInput.value = group ? group.name : '';
-            }
-            newGroupModal.show();
-        }
-
-        if (newGroupModalEl) {
-            newGroupModalEl.addEventListener('shown.bs.modal', function () {
-                if (newGroupInput) {
-                    newGroupInput.focus();
-                    newGroupInput.select();
-                }
-            });
-        }
-
-        function addGroupRow(group) {
-            if (!groupList) return;
-            var empty = groupList.querySelector('.list-group-item.text-muted');
-            if (empty) empty.remove();
-            if (groupList.querySelector('li[data-gid="' + group.id + '"]')) return;
-            var li = document.createElement('li');
-            li.className = 'list-group-item d-flex align-items-center gap-2';
-            li.dataset.gid = group.id;
-            li.innerHTML = '<span class="group-badge badge"></span>' +
-                '<button class="btn btn-sm btn-outline-secondary ms-auto rename-group" type="button">Переименовать</button>' +
-                '<button class="btn btn-sm btn-outline-danger del-group" type="button">Удалить</button>';
-            li.querySelector('.group-badge').textContent = group.name;
-            var renameBtn = li.querySelector('.rename-group');
-            renameBtn.dataset.gid = group.id;
-            renameBtn.dataset.name = group.name;
-            var delBtn = li.querySelector('.del-group');
-            delBtn.dataset.gid = group.id;
-            delBtn.dataset.name = group.name;
-            groupList.appendChild(li);
-            bindRename(renameBtn);
-            bindDelete(delBtn);
-        }
-
-        function renameOption(groupId, name) {
-            document.querySelectorAll('option[value="' + groupId + '"]').forEach(function (o) {
-                if (o.value !== '__new') o.textContent = name;
-            });
-            rows().forEach(function (tr) {
-                if (tr.dataset.groupid === String(groupId)) tr.dataset.group = name.toLowerCase();
-            });
-        }
-
-        function bindRename(btn) {
-            btn.addEventListener('click', function () {
-                openGroupForm({ id: Number(btn.dataset.gid), name: btn.dataset.name || '' }, null);
-            });
-        }
-
-        function bindDelete(btn) {
-            btn.addEventListener('click', function () {
-                var gid = btn.dataset.gid;
-                var name = btn.dataset.name || '';
-                if (!confirm('Удалить группу «' + name + '»? Адреса останутся, но без группы.')) return;
-                fetch(groupDeleteUrl.replace('999999', gid), {
-                    method: 'DELETE'
-                }).then(function () {
-                    var li = groupList ? groupList.querySelector('li[data-gid="' + gid + '"]') : null;
-                    if (li) li.remove();
-                    document.querySelectorAll('.group-select').forEach(function (sel) {
-                        var o = sel.querySelector('option[value="' + gid + '"]');
-                        if (o) { if (sel.value === String(gid)) sel.value = ''; o.remove(); }
-                    });
-                    if (fGroup) {
-                        var fo = fGroup.querySelector('option[value="' + gid + '"]');
-                        if (fo) { if (fGroup.value === String(gid)) fGroup.value = ''; fo.remove(); }
-                    }
-                    rows().forEach(function (tr) {
-                        if (tr.dataset.groupid === String(gid)) {
-                            tr.dataset.groupid = '';
-                            tr.dataset.group = '';
-                            saveMeta(tr.dataset.ip, { group_id: null, comment: tr.dataset.comment || '' });
-                        }
-                    });
-                    applyFilter();
-                });
-            });
-        }
-
-        if (newGroupForm) {
-            newGroupForm.addEventListener('submit', function (e) {
-                e.preventDefault();
-                var name = newGroupInput.value.trim();
-                if (!name) return;
-                var target = editingGroupId;
-                var request;
-                if (target) {
-                    request = fetch(groupRenameUrl.replace('999999', target), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: name })
-                    }).then(function (r) { return r.json(); });
-                } else {
-                    request = createGroup(name);
-                }
-                request.then(function (g) {
-                    if (g.error) { alert(g.error); return; }
-                    if (target) {
-                        renameOption(target, g.name);
-                        var li = groupList ? groupList.querySelector('li[data-gid="' + target + '"]') : null;
-                        if (li) {
-                            li.querySelector('.group-badge').textContent = g.name;
-                            var rb = li.querySelector('.rename-group');
-                            if (rb) rb.dataset.name = g.name;
-                        }
-                    } else {
-                        var exists = false;
-                        if (groupList) {
-                            exists = Array.prototype.some.call(
-                                groupList.querySelectorAll('li[data-gid]'),
-                                function (li) { return li.dataset.gid === String(g.id); });
-                        }
-                        if (exists && !onGroupCreated) {
-                            alert('Группа «' + g.name + '» уже есть — выберите её в списке.');
-                            if (newGroupInput) newGroupInput.select();
-                            return;
-                        }
-                        addGroupOption(g);
-                        addGroupRow(g);
-                    }
-                    if (newGroupModal) newGroupModal.hide();
-                    if (onGroupCreated) onGroupCreated(g);
-                    onGroupCreated = null;
-                }).catch(function () {
-                    alert('нет связи с сервером');
-                });
-            });
-        }
-
-        var addBtn = document.getElementById('addGroupBtn');
-        if (addBtn) addBtn.addEventListener('click', function () { openGroupForm(null, null); });
-
-        groupList && groupList.querySelectorAll('.del-group').forEach(bindDelete);
-        groupList && groupList.querySelectorAll('.rename-group').forEach(bindRename);
-
         document.querySelectorAll('.group-select').forEach(function (sel) {
             sel.dataset.prev = sel.value;
             sel.addEventListener('change', function () {
                 var tr = sel.closest('tr');
-                if (sel.value === '__new') {
-                    sel.value = sel.dataset.prev;
-                    openGroupForm(null, function (g) {
-                        sel.value = String(g.id);
-                        sel.dataset.prev = sel.value;
-                        tr.dataset.groupid = sel.value;
-                        tr.dataset.group = (g.name || '').toLowerCase();
-                        saveMeta(tr.dataset.ip, { group_id: g.id, comment: tr.dataset.comment || '' })
-                            .then(function (res) { if (res.error) alert(res.error); });
-                        applyFilter();
-                    });
-                    return;
-                }
                 sel.dataset.prev = sel.value;
                 tr.dataset.groupid = sel.value;
                 var opt = sel.options[sel.selectedIndex];

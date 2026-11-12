@@ -1798,6 +1798,20 @@ def settings():
     return render_template('settings.html', cfg=get_settings(), title='Настройки')
 
 
+@app.route('/settings/groups')
+@role_required(*MANAGE_ROLES)
+def settings_groups():
+    conn = db()
+    rows = conn.execute(
+        'SELECT g.id, g.name, COUNT(h.ip) AS hosts '
+        'FROM host_groups g LEFT JOIN hosts h ON h.group_id = g.id '
+        'GROUP BY g.id, g.name ORDER BY g.name COLLATE NOCASE').fetchall()
+    conn.close()
+    groups = [{'id': r['id'], 'name': r['name'], 'hosts': r['hosts']} for r in rows]
+    return render_template('groups.html', groups=groups,
+                           settings_tab='groups', title='Настройки')
+
+
 @app.route('/settings/test/<channel>', methods=['POST'])
 @role_required(*MANAGE_ROLES)
 def settings_test(channel):

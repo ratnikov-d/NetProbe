@@ -4,9 +4,11 @@
 
 {% block content %}
 <div class="page-head">
-    <h2>Пользователи</h2>
-    <a href="{{ url_for('settings') }}" class="btn btn-sm btn-outline-secondary">← Настройки</a>
+    <h2>Настройки</h2>
 </div>
+
+{% set settings_tab = 'users' %}
+{% include "_settings_tabs.html" %}
 
 <div class="card shadow-sm mb-4">
     <div class="card-header py-2">Добавить пользователя</div>
