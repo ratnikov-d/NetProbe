@@ -1752,6 +1752,7 @@ def quick_worker(job_id, ips, tcp_ports, udp_ports, workers):
                 tasks.append(('udp', ip, port))
 
         pool_size = max(1, min(workers, total or 1))
+        tcp_timeouts = []
         with ThreadPoolExecutor(max_workers=pool_size) as pool:
             futures = {}
             for proto, ip, port in tasks:
@@ -1759,15 +1760,34 @@ def quick_worker(job_id, ips, tcp_ports, udp_ports, workers):
                 futures[pool.submit(fn, ip, port)] = proto
             for fut in as_completed(futures):
                 proto = futures[fut]
-                ip, port, is_open, _err = fut.result()
+                res = fut.result()
+                ip, port, is_open = res[0], res[1], res[2]
                 if is_open:
                     if proto == 'tcp':
                         tcp_found[ip].append(port)
                     else:
                         udp_found[ip].append(port)
+                elif proto == 'tcp' and len(res) > 4 and res[4] == 'timeout':
+                    tcp_timeouts.append((ip, port))
                 done += 1
                 if done % 20 == 0 or done == total:
                     job['done'] = done
+
+        # порты без ответа перепроверяем медленнее: фильтры роняют часть SYN
+        if tcp_timeouts:
+            job['total'] = total + len(tcp_timeouts)
+            extra_workers = max(1, min(TCP_CONFIRM_WORKERS, len(tcp_timeouts)))
+            with ThreadPoolExecutor(max_workers=extra_workers) as pool:
+                futures = [pool.submit(confirm_probe, ip, port)
+                           for ip, port in tcp_timeouts]
+                for fut in as_completed(futures):
+                    ip, port, is_open, _err = fut.result()
+                    if is_open:
+                        tcp_found[ip].append(port)
+                    done += 1
+                    if done % 20 == 0 or done == job['total']:
+                        job['done'] = done
+            job['done'] = done
 
         job['results'] = []
         for ip in ips:
