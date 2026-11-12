@@ -33,9 +33,16 @@ except AttributeError:  # Windows
 
 DB_NAME = os.environ.get('DB_NAME', 'port_scanner.db')
 SCAN_WORKERS = int(os.environ.get('SCAN_WORKERS', '200'))
-SOCKET_TIMEOUT = float(os.environ.get('SOCKET_TIMEOUT', '0.8'))
+SOCKET_TIMEOUT = float(os.environ.get('SOCKET_TIMEOUT', '1.2'))
 PROBE_RETRIES = int(os.environ.get('PROBE_RETRIES', '1'))
-PROBE_RETRY_DELAY = float(os.environ.get('PROBE_RETRY_DELAY', '0.15'))
+PROBE_RETRY_DELAY = float(os.environ.get('PROBE_RETRY_DELAY', '0.2'))
+# Порти, які не ответили (таймаут/ошибка), перепроверяем после основного прохода
+# медленнее и с большим таймаутом: фильтры на маршрутизаторах роняют часть SYN
+# при плотном сканировании, и открытый порт иначе остаётся незамеченным.
+TCP_CONFIRM_ROUNDS = int(os.environ.get('TCP_CONFIRM_ROUNDS', '2'))
+TCP_CONFIRM_TIMEOUT = float(os.environ.get('TCP_CONFIRM_TIMEOUT', '2.5'))
+TCP_CONFIRM_DELAY = float(os.environ.get('TCP_CONFIRM_DELAY', '1.0'))
+TCP_CONFIRM_WORKERS = int(os.environ.get('TCP_CONFIRM_WORKERS', '100'))
 CLOSE_CONFIRM = int(os.environ.get('CLOSE_CONFIRM', '2'))
 CHUNK_SIZE = int(os.environ.get('CHUNK_SIZE', '2000'))
 SCHED_TICK = int(os.environ.get('SCHED_TICK', '5'))
@@ -246,6 +253,8 @@ def init_db():
     ensure_column(conn, 'scan_logs', 'schedule_id', 'INTEGER')
     ensure_column(conn, 'scan_logs', 'udp_total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'udp_done', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'verify_total', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'verify_done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'hosts', 'updated_at', 'TEXT')
     ensure_column(conn, 'users', 'created_at', 'TEXT')
     ensure_column(conn, 'users', 'last_login', 'TEXT')
@@ -695,28 +704,54 @@ def notify_async(message):
 # ------------------------------------------------------------------ сканирование
 
 
+_REFUSED_CODES = {111, 10061}  # ECONNREFUSED: Linux/BSD и Windows
+
+
 def probe(ip, port):
-    """Проверяет порт. Закрытый порт перепроверяем несколько раз с паузой,
-    чтобы кратковременный таймаут не считался закрытием."""
+    """Проверяет TCP-порт.
+
+    Результат: (ip, port, is_open, error, state), где state —
+      'open'     — соединение установилось;
+      'refused'  — хост ответил RST, порт точно закрыт;
+      'timeout'  — ответа нет (фильтр/потеря пакета) — нужна перепроверка.
+
+    Таймауты повторяем, отказы — нет: RST приходит сразу, повтор ничего
+    не изменит и только растягивает скан."""
     attempts = max(1, PROBE_RETRIES + 1)
+    err = None
+    state = 'timeout'
     for attempt in range(attempts):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(SOCKET_TIMEOUT)
         try:
-            is_open = sock.connect_ex((ip, port)) == 0
-            err = None
+            code = sock.connect_ex((ip, port))
         except OSError as e:
-            is_open = False
-            err = str(e)
+            code, err = -1, str(e)
         finally:
             sock.close()
 
-        if is_open:
-            return ip, port, True, None
+        if code == 0:
+            return ip, port, True, None, 'open'
+        if code in _REFUSED_CODES:
+            return ip, port, False, None, 'refused'
+        state = 'timeout'
         if attempt < attempts - 1:
             time.sleep(PROBE_RETRY_DELAY)
 
-    return ip, port, False, err
+    return ip, port, False, err, state
+
+
+def confirm_probe(ip, port):
+    """Одиночная проверка для второго прохода: длинный таймаут, без спешки."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(TCP_CONFIRM_TIMEOUT)
+    try:
+        code = sock.connect_ex((ip, port))
+    except OSError:
+        code = -1
+    finally:
+        sock.close()
+    return ip, port, code == 0, None
 
 
 UDP_TIMEOUT = float(os.environ.get('UDP_TIMEOUT', '0.6'))
@@ -941,7 +976,7 @@ def add_event(conn, log_id, level, message):
                   level, message))
 
 
-def apply_batch(conn, log_id, batch, suppress=None):
+def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
     now = datetime.now().isoformat(timespec='seconds')
     suppress = suppress or set()
 
@@ -953,7 +988,9 @@ def apply_batch(conn, log_id, batch, suppress=None):
 
     opened = 0
     changed = set()
-    for ip, port, is_open, error in batch:
+    for item in batch:
+        ip, port, is_open, error = item[:4]
+        state = item[4] if len(item) > 4 else 'open' if is_open else 'timeout'
         if error:
             add_event(conn, log_id, 'warning', f'{ip}:{port} — ошибка: {error}')
             continue
@@ -979,6 +1016,9 @@ def apply_batch(conn, log_id, batch, suppress=None):
                     notify_async(f'Новый открытый порт {port} на {ip}')
                 opened += 1
                 changed.add(ip)
+        elif row and not count_miss:
+            # таймаут в первом проходе: закрытием не считаем, порт перепроверят
+            pass
         elif row:
             misses = (row['misses'] or 0) + 1
             if misses >= CLOSE_CONFIRM:
@@ -1004,7 +1044,7 @@ def apply_batch(conn, log_id, batch, suppress=None):
 
 
 def run_chunk(pool, conn, log_id, chunk, stop_event, done, opened_total,
-              suppress=None):
+              suppress=None, uncertain=None):
     futures = [pool.submit(probe, ip, port) for ip, port in chunk]
     batch = []
     opened = 0
@@ -1013,10 +1053,13 @@ def run_chunk(pool, conn, log_id, chunk, stop_event, done, opened_total,
         for fut in as_completed(futures):
             if stop_event.is_set():
                 break
-            batch.append(fut.result())
+            res = fut.result()
+            batch.append(res)
+            if uncertain is not None and res[4] == 'timeout':
+                uncertain.append((res[0], res[1]))
             processed += 1
             if len(batch) >= 100:
-                opened += apply_batch(conn, log_id, batch, suppress)
+                opened += apply_batch(conn, log_id, batch, suppress, count_miss=False)
                 batch.clear()
                 conn.execute('UPDATE scan_logs SET done = ?, open_found = ? WHERE id = ?',
                              (done + processed, opened_total + opened, log_id))
@@ -1026,11 +1069,106 @@ def run_chunk(pool, conn, log_id, chunk, stop_event, done, opened_total,
             for f in futures:
                 f.cancel()
         if batch:
-            opened += apply_batch(conn, log_id, batch, suppress)
+            opened += apply_batch(conn, log_id, batch, suppress, count_miss=False)
         if processed:
             conn.execute('UPDATE scan_logs SET done = ?, open_found = ? WHERE id = ?',
                          (done + processed, opened_total + opened, log_id))
             conn.commit()
+    return opened
+
+
+def confirm_timeouts(conn, log_id, pairs, workers, suppress=None, stop_event=None):
+    """Второй проход по портам, которые не ответили в основном проходе.
+
+    Плотный поток SYN часть маршрутизаторов и провайдеров отбрасывает, и
+    открытый порт выглядит закрытым. Такие пары перепроверяем медленнее и с
+    длинным таймаутом: нашли — записываем как открытый; не ответил ни разу —
+    только тогда считаем порт закрытым."""
+    if not pairs:
+        return 0
+    unique = sorted(set(pairs))
+    rounds = max(1, TCP_CONFIRM_ROUNDS)
+    processed = 0
+    opened = 0
+    found_total = 0
+    pending = unique
+    add_event(conn, log_id, 'info',
+              f'Повторная проверка без ответа: {len(unique)} портов, '
+              f'до {rounds} круга по {TCP_CONFIRM_TIMEOUT} с')
+    conn.execute('UPDATE scan_logs SET verify_total = ?, verify_done = 0 WHERE id = ?',
+                 (len(unique), log_id))
+    conn.commit()
+
+    for rnd in range(rounds):
+        if not pending:
+            break
+        if rnd:
+            time.sleep(TCP_CONFIRM_DELAY)
+        conn.execute('UPDATE scan_logs SET verify_total = ?, verify_done = ? '
+                     'WHERE id = ?', (processed + len(pending), processed, log_id))
+        conn.commit()
+        conf_workers = max(1, min(TCP_CONFIRM_WORKERS,
+                                  workers or TCP_CONFIRM_WORKERS, len(pending)))
+        still = []
+        found = []
+        done_now = 0
+        round_found = 0
+        interrupted = False
+        with ThreadPoolExecutor(max_workers=conf_workers) as pool:
+            futures = [pool.submit(confirm_probe, ip, port) for ip, port in pending]
+            for fut in as_completed(futures):
+                if stop_event is not None and stop_event.is_set():
+                    for f in futures:
+                        f.cancel()
+                    interrupted = True
+                    break
+                ip, port, is_open, _ = fut.result()
+                done_now += 1
+                if is_open:
+                    found.append((ip, port, True, None, 'open'))
+                    round_found += 1
+                else:
+                    still.append((ip, port))
+                if len(found) >= 50:
+                    opened += apply_batch(conn, log_id, found, suppress)
+                    found.clear()
+                if done_now % 50 == 0:
+                    conn.execute('UPDATE scan_logs SET verify_done = ? WHERE id = ?',
+                                 (processed + done_now, log_id))
+                    conn.commit()
+        if found:
+            opened += apply_batch(conn, log_id, found, suppress)
+        processed += done_now
+        found_total += round_found
+        conn.execute('UPDATE scan_logs SET verify_total = ?, verify_done = ? '
+                     'WHERE id = ?', (processed + len(still), processed, log_id))
+        conn.commit()
+        add_event(conn, log_id, 'info',
+                  f'Круг {rnd + 1}: перепроверено {done_now}, '
+                  f'найдено открытыми {round_found}')
+        pending = still
+        if interrupted:
+            break
+
+    if pending and stop_event is not None and stop_event.is_set():
+        # сканирование остановили — промахи не считаем
+        pending = []
+
+    # порты, которые не ответили даже на медленный запрос, считаем закрытыми
+    if pending:
+        closed = [(ip, port, False, None, 'timeout') for ip, port in pending]
+        for i in range(0, len(closed), 200):
+            apply_batch(conn, log_id, closed[i:i + 200], suppress, count_miss=True)
+        add_event(conn, log_id, 'info',
+                  f'Не ответили ни разу за {rounds} круга: {len(closed)} портов '
+                  f'— считаем закрытыми')
+
+    conn.execute('UPDATE scan_logs SET verify_total = ?, verify_done = ? WHERE id = ?',
+                 (processed, processed, log_id))
+    conn.commit()
+    if found_total:
+        add_event(conn, log_id, 'info',
+                  f'Повторная проверка нашла открытых портов: {found_total}')
     return opened
 
 
@@ -1065,7 +1203,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     conn = db()
     conn.execute('UPDATE scan_logs SET total = ?, done = 0, open_found = 0, '
-                 'udp_total = 0, udp_done = 0, '
+                 'udp_total = 0, udp_done = 0, verify_total = 0, verify_done = 0, '
                  "status = 'running', workers = ? WHERE id = ?",
                  (total, workers, log_id))
     if suppress:
@@ -1081,6 +1219,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                       'Все адреса диапазона на паузе — сканировать нечего')
             conn.commit()
         else:
+            uncertain = []
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 chunk = []
                 for ip in ips:
@@ -1092,7 +1231,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                         if len(chunk) >= CHUNK_SIZE:
                             opened_total += run_chunk(pool, conn, log_id, chunk,
                                                       stop_event, done, opened_total,
-                                                      suppress)
+                                                      suppress, uncertain)
                             done += len(chunk)
                             chunk = []
                             if stop_event.is_set():
@@ -1103,8 +1242,11 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                 if chunk and not stop_event.is_set():
                     opened_total += run_chunk(pool, conn, log_id, chunk,
                                               stop_event, done, opened_total,
-                                              suppress)
+                                              suppress, uncertain)
                     done += len(chunk)
+            if not stop_event.is_set() and uncertain:
+                opened_total += confirm_timeouts(conn, log_id, uncertain, workers,
+                                                 suppress, stop_event)
             if not stop_event.is_set() and udp_ports:
                 udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers, suppress)
                 opened_total += udp_opened
@@ -2501,9 +2643,20 @@ def api_progress():
     udp_total = job['udp_total'] or 0
     udp_done = job['udp_done'] or 0
     percent_udp = round(udp_done * 100 / udp_total, 1) if udp_total else 0
+    verify_total = job['verify_total'] or 0
+    verify_done = job['verify_done'] or 0
+    percent_verify = round(verify_done * 100 / verify_total, 1) if verify_total else 0
     phase = 'tcp'
     if job['status'] == 'running' and total and done >= total:
-        phase = 'udp' if udp_total else 'finishing'
+        if verify_total and verify_done < verify_total:
+            phase = 'verify'
+        elif udp_total and udp_done < udp_total:
+            phase = 'udp'
+        elif udp_total or verify_total:
+            phase = 'finishing'
+        else:
+            # все проверки закончились, задание закрывается
+            phase = 'finishing' if job['status'] == 'running' else 'tcp'
     return jsonify({
         'running': job['status'] == 'running',
         'status': job['status'],
@@ -2511,6 +2664,9 @@ def api_progress():
         'udp_total': udp_total,
         'udp_done': udp_done,
         'percent_udp': percent_udp,
+        'verify_total': verify_total,
+        'verify_done': verify_done,
+        'percent_verify': percent_verify,
         'log_id': job['id'],
         'ip_range': job['ip_range'],
         'ports': job['ports'],

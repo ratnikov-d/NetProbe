@@ -99,12 +99,28 @@
                     if (!p || !p.log_id) return;
                     currentJob = p.log_id;
                     setText('progRange', p.ip_range);
-                    var isUdp = p.phase === 'udp' || (!p.running && (p.udp_total || 0) > 0);
-                    var pct = isUdp ? p.percent_udp || 0 : p.percent || 0;
-                    setText('progPct', isUdp ? 'обработка ' + pct + '%' :
-                            (p.phase === 'finishing' ? 'обработка' : pct + '%'));
-                    setText('progDone', isUdp ? p.udp_done || 0 : p.done);
-                    setText('progTotal', isUdp ? p.udp_total || 0 : p.total);
+                    var phase = p.phase;
+                    var isUdp = phase === 'udp';
+                    var isVerify = phase === 'verify';
+                    var pct = isUdp ? (p.percent_udp || 0)
+                            : isVerify ? (p.percent_verify || 0)
+                            : (p.percent || 0);
+                    if (phase === 'tcp') {
+                        setText('progPct', pct + '%');
+                        setText('progDone', p.done);
+                        setText('progTotal', p.total);
+                    } else if (isUdp) {
+                        setText('progPct', 'UDP ' + pct + '%');
+                        setText('progDone', p.udp_done || 0);
+                        setText('progTotal', p.udp_total || 0);
+                    } else if (isVerify) {
+                        setText('progPct', 'проверка ' + pct + '%');
+                        setText('progDone', p.verify_done || 0);
+                        setText('progTotal', p.verify_total || 0);
+                    } else {
+                        // все проверки закончены, задание ещё закрывается
+                        setText('progPct', 'обработка');
+                    }
                     setText('progOpened', p.open_found);
                     var bar = document.getElementById('progBar');
                     if (bar) bar.style.width = pct + '%';
