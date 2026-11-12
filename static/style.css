@@ -400,6 +400,9 @@ th[data-sort]:hover { color: var(--text); }
     background: rgba(148, 163, 184, .10);
     border-style: dashed !important;
     border-color: var(--danger) !important;
+    border-width: 2px !important;
+    padding-top: 2px;
+    padding-bottom: 2px;
     text-decoration: none;
 }
 
