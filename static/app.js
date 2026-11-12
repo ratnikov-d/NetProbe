@@ -100,23 +100,25 @@
                     currentJob = p.log_id;
                     setText('progRange', p.ip_range);
                     var phase = p.phase;
-                    var isUdp = phase === 'udp';
+                    var isUdp = phase === 'udp' || phase === 'udp_verify';
                     var isVerify = phase === 'verify';
                     var pct = isUdp ? (p.percent_udp || 0)
                             : isVerify ? (p.percent_verify || 0)
                             : (p.percent || 0);
                     if (phase === 'tcp') {
-                        setText('progPct', pct + '%');
+                        setText('progPct', 'tcp сканирование ' + pct + '%');
                         setText('progDone', p.done);
                         setText('progTotal', p.total);
-                    } else if (isUdp) {
-                        setText('progPct', 'UDP ' + pct + '%');
-                        setText('progDone', p.udp_done || 0);
-                        setText('progTotal', p.udp_total || 0);
                     } else if (isVerify) {
-                        setText('progPct', 'проверка ' + pct + '%');
+                        setText('progPct', 'tcp проверка ' + pct + '%');
                         setText('progDone', p.verify_done || 0);
                         setText('progTotal', p.verify_total || 0);
+                    } else if (isUdp) {
+                        setText('progPct', phase === 'udp_verify'
+                            ? 'udp проверка ' + pct + '%'
+                            : 'udp сканирование ' + pct + '%');
+                        setText('progDone', p.udp_done || 0);
+                        setText('progTotal', p.udp_total || 0);
                     } else {
                         // все проверки закончены, задание ещё закрывается
                         setText('progPct', 'обработка');

@@ -253,6 +253,7 @@ def init_db():
     ensure_column(conn, 'scan_logs', 'schedule_id', 'INTEGER')
     ensure_column(conn, 'scan_logs', 'udp_total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'udp_done', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'udp_phase', 'TEXT')
     ensure_column(conn, 'scan_logs', 'verify_total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'verify_done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'hosts', 'updated_at', 'TEXT')
@@ -853,11 +854,11 @@ _PROBE_BUILDERS.update({
 UDP_REPLY_FROM_ANY_PORT = {69}
 
 
-def probe_udp(ip, port):
+def probe_udp(ip, port, attempts=None):
     """UDP: открытым считаем порт, который ответил на корректный запрос.
     Пакет отправляем несколько раз: UDP теряется, а часть сервисов отвечает
     не с первого раза."""
-    attempts = max(1, UDP_RETRIES)
+    attempts = max(1, attempts or UDP_RETRIES)
     timeout = UDP_DNS_TIMEOUT if port == 53 else UDP_TIMEOUT
     for attempt in range(attempts):
         payload, is_response = _udp_probe(port)
@@ -883,7 +884,7 @@ def probe_udp(ip, port):
     return ip, port, False, None
 
 
-def apply_udp_batch(conn, log_id, batch, suppress=None):
+def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
     now = datetime.now().isoformat(timespec='seconds')
     suppress = suppress or set()
     opened = 0
@@ -914,6 +915,9 @@ def apply_udp_batch(conn, log_id, batch, suppress=None):
                     notify_async(f'Новый открытый UDP-порт {port} на {ip}')
                 opened += 1
                 changed.add(ip)
+        elif row and not count_miss:
+            # UDP теряется: промах засчитывает только второй проход
+            pass
         elif row:
             misses = (row['misses'] or 0) + 1
             if misses >= CLOSE_CONFIRM:
@@ -933,24 +937,31 @@ def apply_udp_batch(conn, log_id, batch, suppress=None):
     return opened
 
 
-def scan_udp(conn, log_id, ips, ports, workers, suppress):
-    """Второй проход: проверка UDP по тем же портам."""
-    if not UDP_ENABLED or not ips:
-        return 0
-    targets = [(ip, port) for ip in ips for port in ports]
+def _run_udp_phase(conn, log_id, targets, workers, suppress, attempts,
+                   count_miss, stop_event=None):
+    """Один проход UDP: возвращает (сколько новых портов, список без ответа)."""
     total = len(targets)
     processed = 0
+    opened = 0
+    unanswered = []
+    batch = []
     conn.execute('UPDATE scan_logs SET udp_total = ?, udp_done = 0 WHERE id = ?',
                  (total, log_id))
     conn.commit()
-    opened = 0
-    batch = []
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(targets) or 1))) as pool:
-        futures = [pool.submit(probe_udp, ip, port) for ip, port in targets]
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, total or 1))) as pool:
+        futures = [pool.submit(probe_udp, ip, port, attempts)
+                   for ip, port in targets]
         for fut in as_completed(futures):
-            batch.append(fut.result())
+            if stop_event is not None and stop_event.is_set():
+                for f in futures:
+                    f.cancel()
+                break
+            res = fut.result()
+            batch.append(res)
+            if not res[2]:
+                unanswered.append((res[0], res[1]))
             if len(batch) >= 100:
-                new_ports = apply_udp_batch(conn, log_id, batch, suppress)
+                new_ports = apply_udp_batch(conn, log_id, batch, suppress, count_miss)
                 opened += new_ports
                 processed += len(batch)
                 batch.clear()
@@ -959,13 +970,45 @@ def scan_udp(conn, log_id, ips, ports, workers, suppress):
                              (processed, new_ports, log_id))
                 conn.commit()
     if batch:
-        new_ports = apply_udp_batch(conn, log_id, batch, suppress)
+        new_ports = apply_udp_batch(conn, log_id, batch, suppress, count_miss)
         opened += new_ports
         processed += len(batch)
         conn.execute('UPDATE scan_logs SET udp_done = ?, '
                      'open_found = COALESCE(open_found, 0) + ? WHERE id = ?',
                      (processed, new_ports, log_id))
         conn.commit()
+    return opened, unanswered
+
+
+def scan_udp(conn, log_id, ips, ports, workers, suppress, stop_event=None):
+    """UDP в два прохода: сканирование, затем проверка тех, кто не ответил."""
+    if not UDP_ENABLED or not ips:
+        return 0
+    targets = [(ip, port) for ip in ips for port in ports]
+    conn.execute("UPDATE scan_logs SET udp_phase = 'scan' WHERE id = ?", (log_id,))
+    conn.commit()
+    opened, unanswered = _run_udp_phase(conn, log_id, targets, workers, suppress,
+                                        attempts=1, count_miss=False,
+                                        stop_event=stop_event)
+    add_event(conn, log_id, 'info',
+              f'UDP-сканирование: {len(targets)} проверок, новых портов {opened}')
+
+    if unanswered and not (stop_event is not None and stop_event.is_set()):
+        conn.execute("UPDATE scan_logs SET udp_phase = 'verify' WHERE id = ?",
+                     (log_id,))
+        conn.commit()
+        add_event(conn, log_id, 'info',
+                  f'UDP-проверка без ответа: {len(unanswered)} портов, '
+                  f'по {max(1, UDP_RETRIES)} попытки')
+        again, _ = _run_udp_phase(conn, log_id, unanswered, workers, suppress,
+                                  attempts=max(1, UDP_RETRIES), count_miss=True,
+                                  stop_event=stop_event)
+        opened += again
+        add_event(conn, log_id, 'info',
+                  f'UDP-проверка завершена, новых портов: {again}')
+
+    conn.execute("UPDATE scan_logs SET udp_phase = '' WHERE id = ?", (log_id,))
+    conn.commit()
     return opened
 
 
@@ -1203,7 +1246,8 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     conn = db()
     conn.execute('UPDATE scan_logs SET total = ?, done = 0, open_found = 0, '
-                 'udp_total = 0, udp_done = 0, verify_total = 0, verify_done = 0, '
+                 'udp_total = 0, udp_done = 0, udp_phase = \'\', '
+                 'verify_total = 0, verify_done = 0, '
                  "status = 'running', workers = ? WHERE id = ?",
                  (total, workers, log_id))
     if suppress:
@@ -1248,10 +1292,9 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                 opened_total += confirm_timeouts(conn, log_id, uncertain, workers,
                                                  suppress, stop_event)
             if not stop_event.is_set() and udp_ports:
-                udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers, suppress)
+                udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers, suppress,
+                                      stop_event)
                 opened_total += udp_opened
-                add_event(conn, log_id, 'info',
-                          f'UDP-проверка завершена, новых портов: {udp_opened}')
     except Exception as e:  # noqa: BLE001
         add_event(conn, log_id, 'error', f'Сканирование прервано: {e}')
         status = 'failed'
@@ -2648,15 +2691,16 @@ def api_progress():
     percent_verify = round(verify_done * 100 / verify_total, 1) if verify_total else 0
     phase = 'tcp'
     if job['status'] == 'running' and total and done >= total:
+        udp_phase = (job['udp_phase'] or '').strip()
         if verify_total and verify_done < verify_total:
             phase = 'verify'
         elif udp_total and udp_done < udp_total:
-            phase = 'udp'
+            phase = 'udp_verify' if udp_phase == 'verify' else 'udp'
         elif udp_total or verify_total:
+            # все проверки закончились, задание закрывается
             phase = 'finishing'
         else:
-            # все проверки закончились, задание закрывается
-            phase = 'finishing' if job['status'] == 'running' else 'tcp'
+            phase = 'finishing'
     return jsonify({
         'running': job['status'] == 'running',
         'status': job['status'],
