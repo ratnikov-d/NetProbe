@@ -214,6 +214,13 @@ def init_db():
             value TEXT
         )
     ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS host_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_events_log ON scan_events(log_id, id)')
 
     ensure_column(conn, 'scan_logs', 'total', 'INTEGER DEFAULT 0')
@@ -227,6 +234,8 @@ def init_db():
     ensure_column(conn, 'port_state', 'misses', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'schedules', 'udp_ports', 'TEXT')
     ensure_column(conn, 'scan_logs', 'udp_ports', 'TEXT')
+    ensure_column(conn, 'hosts', 'group_id', 'INTEGER')
+    ensure_column(conn, 'hosts', 'comment', 'TEXT')
 
     # разовый бэкфилл адресов из уже собранных открытых портов
     conn.execute('INSERT OR IGNORE INTO hosts (ip, first_seen, last_seen) '
@@ -1256,17 +1265,20 @@ def logout():
 @login_required
 def dashboard():
     conn = db()
-    host_rows = conn.execute('SELECT ip, first_seen, last_seen, updated_at '
-                             'FROM hosts ORDER BY ip').fetchall()
+    host_rows = conn.execute('SELECT ip, first_seen, last_seen, updated_at, '
+                             'group_id, comment FROM hosts ORDER BY ip').fetchall()
     port_rows = conn.execute('SELECT ip, port, first_seen, last_seen '
                              'FROM port_state ORDER BY ip, port').fetchall()
     udp_rows = conn.execute('SELECT ip, port, first_seen, last_seen '
                             'FROM port_state_udp ORDER BY ip, port').fetchall()
     paused_rows = conn.execute('SELECT * FROM paused_ips ORDER BY ip').fetchall()
+    group_rows = conn.execute('SELECT id, name FROM host_groups '
+                              'ORDER BY name COLLATE NOCASE').fetchall()
     last_scan = conn.execute('SELECT * FROM scan_logs ORDER BY id DESC LIMIT 1').fetchone()
     conn.close()
 
     paused = {r['ip'] for r in paused_rows}
+    groups = [{'id': r['id'], 'name': r['name']} for r in group_rows]
     ip_data = {}
     for row in host_rows:
         ip_data[row['ip']] = {
@@ -1274,36 +1286,43 @@ def dashboard():
             'ports': [],
             'last_seen': row['last_seen'],
             'updated': row['updated_at'] or row['last_seen'],
+            'group_id': row['group_id'],
+            'comment': row['comment'] or '',
         }
     for row in port_rows:
         data = ip_data.setdefault(row['ip'], {
             'ip': row['ip'], 'ports': [], 'last_seen': row['last_seen'],
-            'updated': row['last_seen']})
+            'updated': row['last_seen'], 'group_id': None, 'comment': ''})
         data['ports'].append({'port': row['port'], 'proto': 'tcp'})
         if row['last_seen'] > data['last_seen']:
             data['last_seen'] = row['last_seen']
     for row in udp_rows:
         data = ip_data.setdefault(row['ip'], {
             'ip': row['ip'], 'ports': [], 'last_seen': row['last_seen'],
-            'updated': row['last_seen']})
+            'updated': row['last_seen'], 'group_id': None, 'comment': ''})
         data['ports'].append({'port': row['port'], 'proto': 'udp'})
         if row['last_seen'] > data['last_seen']:
             data['last_seen'] = row['last_seen']
     for r in paused_rows:
         ip_data.setdefault(r['ip'], {'ip': r['ip'], 'ports': [],
-                                     'last_seen': '—', 'updated': '—'})
+                                     'last_seen': '—', 'updated': '—',
+                                     'group_id': None, 'comment': ''})
 
     # в таблице только адреса, которые есть в расписании
     scheduled = scheduled_ips()
     ip_data = {ip: data for ip, data in ip_data.items() if ip in scheduled}
 
-    # по умолчанию сортируем по последнему обновлению (свежие сверху)
+    group_names = {g['id']: g['name'] for g in groups}
+    for data in ip_data.values():
+        data['group'] = group_names.get(data['group_id'], '')
+
+    # по умолчанию сортируем по последнему обнаружению (свежие сверху)
     ordered = dict(sorted(ip_data.items(),
                           key=lambda kv: kv[1]['updated'] or '', reverse=True))
 
     running = bool(last_scan and last_scan['status'] == 'running')
     return render_template('dashboard.html', ip_data=ordered, paused=paused,
-                           last_scan=last_scan, running=running,
+                           groups=groups, last_scan=last_scan, running=running,
                            total_hosts=len(ordered),
                            with_open=sum(1 for d in ordered.values() if d['ports']),
                            has_schedules=bool(scheduled),
@@ -1999,6 +2018,80 @@ def ip_resume(ip):
     conn.close()
     flash(f'{ip} снят с паузы', 'success')
     return redirect(request.referrer or url_for('dashboard'))
+
+
+# ------------------------------------------------ группы адресов и комментарии
+
+
+@app.route('/api/host/meta', methods=['POST'])
+@role_required(*MANAGE_ROLES)
+def api_host_meta():
+    data = request.get_json(silent=True) or {}
+    ip = (data.get('ip') or '').strip()
+    try:
+        ip_to_int(ip)
+    except ValueError:
+        return jsonify({'error': 'Некорректный IP'}), 400
+
+    group_id = data.get('group_id')
+    if group_id in ('', None):
+        group_id = None
+    else:
+        try:
+            group_id = int(group_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Некорректная группа'}), 400
+
+    comment = (data.get('comment') or '').strip()[:500]
+
+    conn = db()
+    if group_id is not None:
+        exists = conn.execute('SELECT 1 FROM host_groups WHERE id = ?',
+                              (group_id,)).fetchone()
+        if not exists:
+            conn.close()
+            return jsonify({'error': 'Группа не найдена'}), 400
+    now = datetime.now().isoformat(timespec='seconds')
+    conn.execute('INSERT OR IGNORE INTO hosts (ip, first_seen, last_seen) '
+                 'VALUES (?, ?, ?)', (ip, now, now))
+    conn.execute('UPDATE hosts SET group_id = ?, comment = ? WHERE ip = ?',
+                 (group_id, comment, ip))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'group_id': group_id, 'comment': comment})
+
+
+@app.route('/api/groups', methods=['POST'])
+@role_required(*MANAGE_ROLES)
+def api_group_create():
+    data = request.get_json(silent=True) or {}
+    name = ' '.join((data.get('name') or '').split())
+    if not name:
+        return jsonify({'error': 'Введите название группы'}), 400
+    name = name[:40]
+    conn = db()
+    row = conn.execute('SELECT id, name FROM host_groups '
+                       'WHERE name = ? COLLATE NOCASE', (name,)).fetchone()
+    if row:
+        conn.close()
+        return jsonify({'id': row['id'], 'name': row['name']})
+    cur = conn.execute('INSERT INTO host_groups (name, created_at) VALUES (?, ?)',
+                       (name, datetime.now().isoformat(timespec='seconds')))
+    conn.commit()
+    group_id = cur.lastrowid
+    conn.close()
+    return jsonify({'id': group_id, 'name': name})
+
+
+@app.route('/api/groups/<int:group_id>', methods=['DELETE'])
+@role_required(*MANAGE_ROLES)
+def api_group_delete(group_id):
+    conn = db()
+    conn.execute('UPDATE hosts SET group_id = NULL WHERE group_id = ?', (group_id,))
+    conn.execute('DELETE FROM host_groups WHERE id = ?', (group_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
 
 
 # -------------------------------------------------------------------------- API

@@ -331,6 +331,41 @@ th[data-sort]:hover { color: var(--text); }
 
 .port-list .badge { white-space: nowrap; }
 
+/* колонки «Группа» и «Комментарий» в результатах */
+#resultsTable .cell-group { min-width: 150px; }
+#resultsTable .cell-comment { min-width: 200px; }
+
+#resultsTable .group-select {
+    min-width: 140px;
+    font-size: .78rem;
+    padding: 2px 26px 2px 8px;
+    background-position: right .5rem center;
+    background-size: 10px 8px;
+}
+
+#resultsTable .comment-input {
+    font-size: .82rem;
+    padding: 3px 8px;
+}
+
+.group-badge {
+    background: rgba(59, 130, 246, .14);
+    color: #1d4ed8;
+    border: 1px solid rgba(59, 130, 246, .32);
+    font-weight: 600;
+    font-size: .74rem;
+    border-radius: 7px;
+    padding: 3px 9px;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .group-badge {
+    background: rgba(96, 165, 250, .18);
+    color: #bfdbfe;
+    border-color: rgba(96, 165, 250, .38);
+}
+
+
 .badge-port .proto,
 .badge-port-udp .proto {
     margin-left: .25rem;

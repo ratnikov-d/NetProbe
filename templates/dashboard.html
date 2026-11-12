@@ -5,6 +5,10 @@
 {% block content %}
 <div class="page-head">
     <h2>Результаты сканирования</h2>
+    {% if current_user.can_manage %}
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="modal" data-bs-target="#groupsModal">Группы</button>
+    {% endif %}
 </div>
 
 {% if not has_schedules %}
@@ -33,25 +37,36 @@
 
 <!-- фильтры -->
 <div class="row g-2 align-items-center mb-2">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <input id="fIp" class="form-control form-control-sm" placeholder="Фильтр по IP (например 192.168.1.)">
     </div>
-    <div class="col-md-3">
-        <input id="fPort" class="form-control form-control-sm" placeholder="Фильтр по порту (443)">
+    <div class="col-md-2">
+        <input id="fPort" class="form-control form-control-sm" placeholder="Порт (443)">
+    </div>
+    <div class="col-md-2">
+        <select id="fGroup" class="form-select form-select-sm">
+            <option value="">Все группы</option>
+            <option value="__none">без группы</option>
+            {% for g in groups %}
+            <option value="{{ g.id }}">{{ g.name }}</option>
+            {% endfor %}
+        </select>
     </div>
     <div class="col-md-3">
+        <input id="fText" class="form-control form-control-sm"
+               placeholder="Поиск по комментарию">
+    </div>
+    <div class="col-md-2">
         <div class="form-check mt-1">
             <input class="form-check-input" type="checkbox" id="fOnlyOpen" checked>
-            <label class="form-check-label small" for="fOnlyOpen">только с открытыми портами</label>
+            <label class="form-check-label small" for="fOnlyOpen">только с портами</label>
         </div>
-    </div>
-    <div class="col-md-2 text-end">
-        <span class="text-muted small" id="rowCount"></span>
     </div>
 </div>
 
 <p class="text-muted small mb-2">
     Всего адресов: {{ total_hosts }} · с открытыми портами: {{ with_open }}
+    <span class="ms-2" id="rowCount"></span>
 </p>
 
 <div class="table-responsive">
@@ -61,6 +76,10 @@
                 <th data-sort="ip" class="user-select-none" style="cursor: pointer;">
                     IP-адрес <span class="sort-mark"></span>
                 </th>
+                <th data-sort="group" class="user-select-none" style="cursor: pointer;">
+                    Группа <span class="sort-mark"></span>
+                </th>
+                <th>Комментарий</th>
                 <th data-sort="pcount" class="user-select-none" style="cursor: pointer;">
                     Открытые порты <span class="sort-mark"></span>
                 </th>
@@ -68,7 +87,7 @@
                     Последняя проверка <span class="sort-mark"></span>
                 </th>
                 <th data-sort="updated" class="user-select-none" style="cursor: pointer;">
-                    Последнее обновление <span class="sort-mark">▼</span>
+                    Последнее обнаружение <span class="sort-mark">▼</span>
                 </th>
                 <th class="text-end">Действия</th>
             </tr>
@@ -84,11 +103,42 @@
                 data-minport="{{ (data.ports|map(attribute='port')|min) if data.ports else 0 }}"
                 data-seen="{{ data.last_seen }}"
                 data-updated="{{ data.updated }}"
+                data-groupid="{{ data.group_id or '' }}"
+                data-group="{{ data.group|lower }}"
+                data-comment="{{ data.comment }}"
                 class="{% if is_paused %}table-secondary{% endif %}">
                 <td>
                     <strong>{{ data.ip }}</strong>
                     {% if is_paused %}
                     <span class="badge bg-warning text-dark ms-1">пауза</span>
+                    {% endif %}
+                </td>
+                <td class="cell-group">
+                    {% if current_user.can_manage %}
+                    <select class="form-select form-select-sm group-select"
+                            data-ip="{{ data.ip }}" aria-label="Группа для {{ data.ip }}">
+                        <option value="">— без группы —</option>
+                        {% for g in groups %}
+                        <option value="{{ g.id }}" {% if data.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                        {% endfor %}
+                        <option value="__new">+ создать группу…</option>
+                    </select>
+                    {% else %}
+                    {% if data.group %}
+                    <span class="badge group-badge">{{ data.group }}</span>
+                    {% else %}
+                    <span class="text-muted small">—</span>
+                    {% endif %}
+                    {% endif %}
+                </td>
+                <td class="cell-comment">
+                    {% if current_user.can_manage %}
+                    <input class="form-control form-control-sm comment-input"
+                           value="{{ data.comment }}" maxlength="500"
+                           placeholder="что на IP расположено"
+                           aria-label="Комментарий для {{ data.ip }}">
+                    {% else %}
+                    {{ data.comment or '—' }}
                     {% endif %}
                 </td>
                 <td>
@@ -101,8 +151,8 @@
                         {% endfor %}
                     </div>
                 </td>
-                <td class="text-muted small">{{ data.last_seen }}</td>
-                <td class="text-muted small">{{ data.updated }}</td>
+                <td class="text-muted small text-nowrap">{{ data.last_seen }}</td>
+                <td class="text-muted small text-nowrap">{{ data.updated }}</td>
                 <td class="text-end text-nowrap">
                     <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
                           class="d-inline" data-keep-scroll>
@@ -128,7 +178,7 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="4" class="text-center text-muted py-4">
+                <td colspan="7" class="text-center text-muted py-4">
                     Результатов пока нет. Запустите сканирование.
                 </td>
             </tr>
@@ -141,7 +191,43 @@
     В таблице только открытые порты. Закрытые порты удаляются автоматически,
     алерт создаётся только при появлении нового открытого порта.
     Клик по заголовку — сортировка. Адреса на паузе не сканируются автоматически.
+    Группа и комментарий сохраняются сразу после изменения.
 </p>
+
+{% if current_user.can_manage %}
+<div class="modal fade" id="groupsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Группы адресов</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">
+                    Названия задаются вручную: web, почтовые серверы, АРМ бухгалтерии и т. п.
+                    Удаление группы не удаляет адреса — они просто остаются без группы.
+                </p>
+                <div class="input-group input-group-sm mb-3">
+                    <input id="newGroupName" class="form-control" maxlength="40"
+                           placeholder="Название новой группы">
+                    <button class="btn btn-outline-primary" type="button" id="addGroupBtn">Добавить</button>
+                </div>
+                <ul class="list-group list-group-flush" id="groupList">
+                    {% for g in groups %}
+                    <li class="list-group-item d-flex align-items-center gap-2 px-0" data-gid="{{ g.id }}">
+                        <span class="group-badge badge">{{ g.name }}</span>
+                        <button class="btn btn-sm btn-outline-danger ms-auto del-group"
+                                type="button" data-gid="{{ g.id }}" data-name="{{ g.name }}">Удалить</button>
+                    </li>
+                    {% else %}
+                    <li class="list-group-item px-0 text-muted small">Групп пока нет.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 
 <script>
 (function () {
@@ -179,6 +265,8 @@
     // ------------------------------------------------------------ фильтрация
     var fIp = document.getElementById('fIp');
     var fPort = document.getElementById('fPort');
+    var fGroup = document.getElementById('fGroup');
+    var fText = document.getElementById('fText');
     var fOnlyOpen = document.getElementById('fOnlyOpen');
     var tbody = document.querySelector('#resultsTable tbody');
 
@@ -189,6 +277,8 @@
     function applyFilter() {
         var ipPart = fIp.value.trim();
         var portPart = fPort.value.trim();
+        var groupPart = fGroup ? fGroup.value : '';
+        var textPart = fText ? fText.value.trim().toLowerCase() : '';
         var onlyOpen = fOnlyOpen.checked;
         var shown = 0;
         rows().forEach(function (tr) {
@@ -197,6 +287,12 @@
             if (ok && portPart) {
                 var ports = (tr.dataset.ports || '').split(' ').filter(Boolean);
                 ok = ports.indexOf(portPart) !== -1;
+            }
+            if (ok && groupPart === '__none') ok = !tr.dataset.groupid;
+            else if (ok && groupPart && tr.dataset.groupid !== groupPart) ok = false;
+            if (ok && textPart) {
+                var hay = (tr.dataset.comment || '').toLowerCase() + ' ' + (tr.dataset.group || '');
+                ok = hay.indexOf(textPart) !== -1;
             }
             if (ok && onlyOpen && Number(tr.dataset.pcount) === 0) ok = false;
             tr.style.display = ok ? '' : 'none';
@@ -207,7 +303,168 @@
 
     fIp.addEventListener('input', applyFilter);
     fPort.addEventListener('input', applyFilter);
+    if (fGroup) fGroup.addEventListener('change', applyFilter);
+    if (fText) fText.addEventListener('input', applyFilter);
     fOnlyOpen.addEventListener('change', applyFilter);
+
+    // -------------------------------------------------------- группа и комментарий
+    var canManage = {{ 'true' if current_user.can_manage else 'false' }};
+    var groupDeleteUrl = '{{ url_for("api_group_delete", group_id=999999) }}';
+
+    function saveMeta(ip, payload) {
+        return fetch('{{ url_for("api_host_meta") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        }).then(function (r) { return r.json(); }).catch(function () {
+            return { error: 'нет связи с сервером' };
+        });
+    }
+
+    function addGroupOption(group) {
+        var value = String(group.id);
+        if (fGroup && !fGroup.querySelector('option[value="' + value + '"]')) {
+            fGroup.add(new Option(group.name, value));
+        }
+        document.querySelectorAll('.group-select').forEach(function (sel) {
+            if (sel.querySelector('option[value="' + value + '"]')) return;
+            var newOpt = sel.querySelector('option[value="__new"]');
+            var opt = new Option(group.name, value);
+            if (newOpt) sel.insertBefore(opt, newOpt); else sel.add(opt);
+        });
+    }
+
+    function createGroup(name) {
+        return fetch('{{ url_for("api_group_create") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+        }).then(function (r) { return r.json(); });
+    }
+
+    if (canManage) {
+        document.querySelectorAll('.group-select').forEach(function (sel) {
+            sel.dataset.prev = sel.value;
+            sel.addEventListener('change', function () {
+                var tr = sel.closest('tr');
+                if (sel.value === '__new') {
+                    var name = window.prompt('Название группы (например: web, почта, АРМ бухгалтерии)');
+                    if (!name || !name.trim()) { sel.value = sel.dataset.prev; return; }
+                    createGroup(name).then(function (g) {
+                        if (g.error) { alert(g.error); sel.value = sel.dataset.prev; return; }
+                        addGroupOption(g);
+                        sel.value = String(g.id);
+                        sel.dataset.prev = sel.value;
+                        tr.dataset.groupid = sel.value;
+                        tr.dataset.group = (g.name || '').toLowerCase();
+                        saveMeta(tr.dataset.ip, { group_id: g.id, comment: tr.dataset.comment || '' })
+                            .then(function (res) { if (res.error) alert(res.error); });
+                        applyFilter();
+                    });
+                    return;
+                }
+                sel.dataset.prev = sel.value;
+                tr.dataset.groupid = sel.value;
+                var opt = sel.options[sel.selectedIndex];
+                tr.dataset.group = (sel.value ? opt.textContent : '').toLowerCase();
+                saveMeta(tr.dataset.ip, {
+                    group_id: sel.value || null,
+                    comment: tr.dataset.comment || ''
+                }).then(function (res) { if (res.error) alert(res.error); });
+                applyFilter();
+            });
+        });
+
+        document.querySelectorAll('.comment-input').forEach(function (inp) {
+            var timer = null;
+            function flush() {
+                var tr = inp.closest('tr');
+                tr.dataset.comment = inp.value;
+                saveMeta(tr.dataset.ip, {
+                    group_id: tr.dataset.groupid || null,
+                    comment: inp.value
+                }).then(function (res) { if (res.error) alert(res.error); });
+            }
+            inp.addEventListener('input', function () {
+                clearTimeout(timer);
+                timer = setTimeout(flush, 800);
+            });
+            inp.addEventListener('blur', function () {
+                clearTimeout(timer);
+                flush();
+            });
+        });
+
+        var addBtn = document.getElementById('addGroupBtn');
+        var nameInput = document.getElementById('newGroupName');
+
+        function addGroupRow(group) {
+            var list = document.getElementById('groupList');
+            if (!list) return;
+            var empty = list.querySelector('.list-group-item.text-muted');
+            if (empty) empty.remove();
+            if (list.querySelector('li[data-gid="' + group.id + '"]')) return;
+            var li = document.createElement('li');
+            li.className = 'list-group-item d-flex align-items-center gap-2 px-0';
+            li.dataset.gid = group.id;
+            li.innerHTML = '<span class="group-badge badge"></span>' +
+                '<button class="btn btn-sm btn-outline-danger ms-auto del-group" type="button">Удалить</button>';
+            li.querySelector('.group-badge').textContent = group.name;
+            li.querySelector('.del-group').dataset.gid = group.id;
+            li.querySelector('.del-group').dataset.name = group.name;
+            list.appendChild(li);
+            bindDelete(li.querySelector('.del-group'));
+        }
+
+        function bindDelete(btn) {
+            btn.addEventListener('click', function () {
+                var gid = btn.dataset.gid;
+                var name = btn.dataset.name || '';
+                if (!confirm('Удалить группу «' + name + '»? Адреса останутся, но без группы.')) return;
+                fetch(groupDeleteUrl.replace('999999', gid), {
+                    method: 'DELETE'
+                }).then(function () {
+                    var li = document.querySelector('#groupList li[data-gid="' + gid + '"]');
+                    if (li) li.remove();
+                    document.querySelectorAll('.group-select').forEach(function (sel) {
+                        var o = sel.querySelector('option[value="' + gid + '"]');
+                        if (o) { if (sel.value === String(gid)) sel.value = ''; o.remove(); }
+                    });
+                    if (fGroup) {
+                        var fo = fGroup.querySelector('option[value="' + gid + '"]');
+                        if (fo) { if (fGroup.value === String(gid)) fGroup.value = ''; fo.remove(); }
+                    }
+                    rows().forEach(function (tr) {
+                        if (tr.dataset.groupid === String(gid)) {
+                            tr.dataset.groupid = '';
+                            tr.dataset.group = '';
+                            saveMeta(tr.dataset.ip, { group_id: null, comment: tr.dataset.comment || '' });
+                        }
+                    });
+                    applyFilter();
+                });
+            });
+        }
+
+        if (addBtn) {
+            function submitGroup() {
+                var name = nameInput.value.trim();
+                if (!name) return;
+                createGroup(name).then(function (g) {
+                    if (g.error) { alert(g.error); return; }
+                    addGroupOption(g);
+                    addGroupRow(g);
+                    nameInput.value = '';
+                });
+            }
+            addBtn.addEventListener('click', submitGroup);
+            nameInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') { e.preventDefault(); submitGroup(); }
+            });
+        }
+
+        document.querySelectorAll('.del-group').forEach(bindDelete);
+    }
 
     // -------------------------------------------------------------- сортировка
     var sortState = { key: 'updated', dir: -1 };
@@ -228,6 +485,14 @@
                 if (ac !== bc) return (ac - bc) * dir;
                 // при равном количестве — по номеру порта (по возрастанию)
                 return Number(a.dataset.minport) - Number(b.dataset.minport);
+            }
+            if (key === 'group') {
+                av = a.dataset.group || ''; bv = b.dataset.group || '';
+                if (av === bv) return a.dataset.ipnum.localeCompare(b.dataset.ipnum);
+                // адреса без группы всегда в конце
+                if (!av) return 1;
+                if (!bv) return -1;
+                return av.localeCompare(bv, 'ru') * dir;
             }
             if (key === 'updated') {
                 av = a.dataset.updated || ''; bv = b.dataset.updated || '';
