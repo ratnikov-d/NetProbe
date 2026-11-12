@@ -5,10 +5,8 @@
 {% block content %}
 <div class="page-head">
     <h2>История сканирований</h2>
-    {% if current_user.can_manage %}
-    {% if current_user.can_manage %}
+    {% if current_user.can('scan') %}
     <a href="{{ url_for('quick') }}" class="btn btn-sm btn-primary">Разовое сканирование</a>
-    {% endif %}
     {% endif %}
 </div>
 
@@ -94,7 +92,7 @@
                         <div class="d-inline-flex gap-1">
                             <a href="{{ url_for('log_detail', log_id=job['id']) }}"
                                class="btn btn-sm btn-outline-secondary">Лог</a>
-                            {% if job['status'] == 'running' and current_user.can_manage %}
+                            {% if job['status'] == 'running' and current_user.can('scan') %}
                             <form method="POST" action="{{ url_for('stop_scan_form', log_id=job['id']) }}">
                                 <button class="btn btn-sm btn-outline-danger" type="submit">Стоп</button>
                             </form>

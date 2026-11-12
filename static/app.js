@@ -232,4 +232,69 @@
             el.addEventListener('mouseleave', function () { tip.classList.remove('is-visible'); });
         });
     });
+
+    // ------------------------------------------------- история по адресу
+    document.addEventListener('DOMContentLoaded', function () {
+        var modalEl = document.getElementById('hostHistoryModal');
+        if (!modalEl || typeof bootstrap === 'undefined') return;
+
+        var modal = new bootstrap.Modal(modalEl);
+        var titleIp = document.getElementById('hostHistoryIp');
+        var body = document.getElementById('hostHistoryBody');
+
+        function renderHistory(data) {
+            if (!body) return;
+            if (!data.events || !data.events.length) {
+                body.innerHTML = '<div class="text-muted small">' +
+                    'Событий по адресу пока нет: адрес сканировался, но порты не менялись.</div>';
+                return;
+            }
+            var html = '';
+            data.events.forEach(function (e) {
+                var ports = e.ports.map(function (p) {
+                    return '<span class="badge ' +
+                        (e.action === 'opened' ? 'badge-port' : 'bg-secondary') +
+                        ' me-1">' + p + '</span>';
+                }).join('');
+                html += '<div class="np-history__row">' +
+                    '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +
+                    '<span class="np-history__what">' +
+                        (e.action === 'opened'
+                            ? 'найден порт' + (e.ports.length > 1 ? 'ы' : '')
+                            : 'порт' + (e.ports.length > 1 ? 'ы' : '') +
+                              ' закрыт' + (e.ports.length > 1 ? 'ы' : '')) +
+                    '</span>' +
+                    '<span class="np-history__ports">' + ports + '</span>' +
+                '</div>';
+            });
+            body.innerHTML = html;
+        }
+
+        function openHistory(ip) {
+            if (titleIp) titleIp.textContent = ip;
+            if (body) body.innerHTML = '<div class="text-muted small">Загрузка…</div>';
+            modal.show();
+            fetch('/api/hosts/' + encodeURIComponent(ip) + '/history')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.error) {
+                        if (body) body.innerHTML =
+                            '<div class="text-danger small">' + data.error + '</div>';
+                        return;
+                    }
+                    renderHistory(data);
+                })
+                .catch(function () {
+                    if (body) body.innerHTML =
+                        '<div class="text-danger small">Нет связи с сервером</div>';
+                });
+        }
+
+        // делегирование: работает и для строк, добавленных позже
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.ip-link');
+            if (!btn || !btn.dataset.ip) return;
+            openHistory(btn.dataset.ip);
+        });
+    });
 })();

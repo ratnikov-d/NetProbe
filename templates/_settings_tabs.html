@@ -1,13 +1,17 @@
 <ul class="nav settings-tabs mb-3">
+    {% if current_user.can('hosts') %}
     <li class="nav-item">
         <a class="nav-link {% if settings_tab == 'groups' %}active{% endif %}"
            href="{{ url_for('settings_groups') }}">Группы</a>
     </li>
+    {% endif %}
+    {% if current_user.can('settings') %}
     <li class="nav-item">
         <a class="nav-link {% if settings_tab == 'notifications' %}active{% endif %}"
            href="{{ url_for('settings') }}">Оповещения</a>
     </li>
-    {% if current_user.is_admin %}
+    {% endif %}
+    {% if current_user.can('users') %}
     <li class="nav-item">
         <a class="nav-link {% if settings_tab == 'users' %}active{% endif %}"
            href="{{ url_for('users') }}">Пользователи</a>

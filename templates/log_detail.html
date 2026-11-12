@@ -7,7 +7,7 @@
     <h2 class="mb-0">Задание #{{ job['id'] }}</h2>
     <div class="d-flex gap-2">
         <a href="{{ url_for('logs') }}" class="btn btn-sm btn-outline-secondary">← К истории</a>
-        {% if job['status'] == 'running' and current_user.can_manage %}
+        {% if job['status'] == 'running' and current_user.can('scan') %}
         <form method="POST" action="{{ url_for('stop_scan_form', log_id=job['id']) }}">
             <button class="btn btn-sm btn-outline-danger" type="submit">Остановить</button>
         </form>

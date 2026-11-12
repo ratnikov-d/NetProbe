@@ -78,22 +78,7 @@
     <span class="ms-2" id="rowCount"></span>
 </p>
 
-{% if current_user.can_manage %}
-<form class="np-purge" id="portPurgeForm" autocomplete="off">
-    <label class="small text-muted mb-0" for="purgePort">Удалить порт из таблицы:</label>
-    <input id="purgePort" class="form-control form-control-sm np-purge__input"
-           inputmode="numeric" maxlength="5" placeholder="53">
-    <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
-    <div class="form-check form-check-inline mb-0 ms-1">
-        <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
-        <label class="form-check-label small" for="purgeFromSchedules">
-            исключить его из всех расписаний
-        </label>
-    </div>
-</form>
-{% endif %}
-
-{% if current_user.can_manage %}
+{% if current_user.can('hosts') or current_user.can('scan') %}
 <div class="bulk-bar" id="bulkBar">
     <span class="bulk-count">Выбрано: <strong id="bulkCount">0</strong></span>
     <div class="bulk-group">
@@ -117,7 +102,7 @@
     <table class="table table-striped table-hover align-middle" id="resultsTable">
         <thead class="table-dark">
             <tr>
-                {% if current_user.can_manage %}
+                {% if current_user.can('hosts') or current_user.can('scan') %}
                 <th class="cell-check">
                     <input class="form-check-input" type="checkbox" id="checkAll"
                            aria-label="Выбрать все видимые адреса">
@@ -157,7 +142,7 @@
                 data-group="{{ data.group|lower }}"
                 data-comment="{{ data.comment }}"
                 class="{% if is_paused %}table-secondary{% endif %}">
-                {% if current_user.can_manage %}
+                {% if current_user.can('hosts') or current_user.can('scan') %}
                 <td class="cell-check">
                     <input class="form-check-input row-check" type="checkbox"
                            value="{{ data.ip }}" aria-label="Выбрать {{ data.ip }}">
@@ -171,7 +156,7 @@
                     {% endif %}
                 </td>
                 <td class="cell-group">
-                    {% if current_user.can_manage %}
+                    {% if current_user.can('hosts') %}
                     <select class="form-select form-select-sm group-select"
                             data-ip="{{ data.ip }}" aria-label="Группа для {{ data.ip }}">
                         <option value="">— без группы —</option>
@@ -189,7 +174,7 @@
                     {% endif %}
                 </td>
                 <td class="cell-comment">
-                    {% if current_user.can_manage %}
+                    {% if current_user.can('hosts') %}
                     <input class="form-control form-control-sm comment-input"
                            value="{{ data.comment }}" maxlength="500"
                            aria-label="Комментарий для {{ data.ip }}">
@@ -216,7 +201,7 @@
                         <button class="btn btn-sm btn-outline-primary" type="submit"
                                 title="Проверить этот адрес сейчас">Проверить</button>
                     </form>
-                    {% if current_user.can_manage %}
+                    {% if current_user.can('hosts') %}
                     {% if is_paused %}
                     <form method="POST" action="{{ url_for('ip_resume', ip=data.ip) }}"
                           class="d-inline" data-keep-scroll>
@@ -235,7 +220,8 @@
             </tr>
             {% else %}
             <tr>
-                <td colspan="{{ 8 if current_user.can_manage else 7 }}" class="text-center text-muted py-4">
+                <td colspan="{{ 8 if (current_user.can('hosts') or current_user.can('scan')) else 7 }}"
+                    class="text-center text-muted py-4">
                     Результатов пока нет. Запустите сканирование.
                 </td>
             </tr>
@@ -251,24 +237,32 @@
     Группа и комментарий сохраняются сразу после изменения.
 </p>
 
-{% if current_user.can_manage %}
-<div class="modal fade" id="hostHistoryModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">История адреса <code id="hostHistoryIp"></code></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-            </div>
-            <div class="modal-body">
-                <div id="hostHistoryBody" class="np-history">Загрузка…</div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
-            </div>
+{% if current_user.can('purge') %}
+<details class="np-purge-wrap">
+    <summary>Удалить порт из таблицы</summary>
+    <form class="np-purge" id="portPurgeForm" autocomplete="off">
+        <label class="small text-muted mb-0" for="purgeProto">Протокол</label>
+        <select id="purgeProto" class="form-select form-select-sm np-purge__proto"
+                aria-label="Протокол">
+            <option value="both">TCP и UDP</option>
+            <option value="tcp">TCP</option>
+            <option value="udp">UDP</option>
+        </select>
+        <input id="purgePort" class="form-control form-control-sm np-purge__input"
+               inputmode="numeric" maxlength="5" placeholder="53"
+               aria-label="Номер порта">
+        <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
+        <div class="form-check form-check-inline mb-0 ms-1">
+            <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
+            <label class="form-check-label small" for="purgeFromSchedules">
+                исключить его из всех расписаний
+            </label>
         </div>
-    </div>
-</div>
+    </form>
+</details>
+{% endif %}
 
+{% if current_user.can('hosts') or current_user.can('scan') %}
 <div class="modal fade" id="groupFormModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -396,7 +390,7 @@
     fOnlyOpen.addEventListener('change', applyFilter);
 
     // -------------------------------------------------------- группа и комментарий
-    var canManage = {{ 'true' if current_user.can_manage else 'false' }};
+    var canManage = {{ 'true' if (current_user.can('hosts') or current_user.can('scan')) else 'false' }};
 
     function saveMeta(ip, payload) {
         var body = { ip: ip };
@@ -628,72 +622,19 @@
 
         restoreSelection();
 
-        // ------------------------------------------------ история по адресу
-        var historyModalEl = document.getElementById('hostHistoryModal');
-        var historyModal = historyModalEl ? new bootstrap.Modal(historyModalEl) : null;
-        var historyIp = document.getElementById('hostHistoryIp');
-        var historyBody = document.getElementById('hostHistoryBody');
-
-        function renderHistory(ip, data) {
-            if (!historyBody) return;
-            if (!data.events || !data.events.length) {
-                historyBody.innerHTML = '<div class="text-muted small">' +
-                    'Событий по адресу пока нет: адрес сканировался, но порты не менялись.</div>';
-                return;
-            }
-            var html = '';
-            data.events.forEach(function (e) {
-                var cls = e.action === 'opened' ? 'np-history__port' : 'np-history__port np-history__port--closed';
-                var ports = e.ports.map(function (p) {
-                    return '<span class="badge ' + (e.action === 'opened' ? 'badge-port' : 'bg-secondary') +
-                        ' me-1">' + p + '</span>';
-                }).join('');
-                html += '<div class="np-history__row">' +
-                    '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +
-                    '<span class="np-history__what">' +
-                        (e.action === 'opened' ? 'найден порт' + (e.ports.length > 1 ? 'ы' : '') :
-                                                 'порт' + (e.ports.length > 1 ? 'ы' : '') + ' закрыт' + (e.ports.length > 1 ? 'ы' : '')) +
-                    '</span>' +
-                    '<span class="np-history__ports">' + ports + '</span>' +
-                '</div>';
-            });
-            historyBody.innerHTML = html;
-        }
-
-        function openHistory(ip) {
-            if (!historyModal) return;
-            if (historyIp) historyIp.textContent = ip;
-            if (historyBody) historyBody.innerHTML = '<div class="text-muted small">Загрузка…</div>';
-            historyModal.show();
-            fetch('/api/hosts/' + encodeURIComponent(ip) + '/history')
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (data.error) {
-                        if (historyBody) historyBody.innerHTML =
-                            '<div class="text-danger small">' + data.error + '</div>';
-                        return;
-                    }
-                    renderHistory(ip, data);
-                })
-                .catch(function () {
-                    if (historyBody) historyBody.innerHTML =
-                        '<div class="text-danger small">Нет связи с сервером</div>';
-                });
-        }
-
-        document.querySelectorAll('.ip-link').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                openHistory(btn.dataset.ip);
-            });
-        });
-
         // ------------------------------------------------ удалить порт из таблицы
-        function stripPortFromTable(port) {
+        function stripPortFromTable(port, proto) {
             var target = String(port);
+            var wantTcp = proto !== 'udp';
+            var wantUdp = proto !== 'tcp';
             rows().forEach(function (tr) {
                 var removed = 0;
                 tr.querySelectorAll('.port-list .badge[data-port]').forEach(function (chip) {
-                    if (chip.dataset.port === target) { chip.remove(); removed++; }
+                    var isUdp = chip.dataset.proto === 'udp';
+                    if (chip.dataset.port !== target) return;
+                    if (isUdp ? !wantUdp : !wantTcp) return;
+                    chip.remove();
+                    removed++;
                 });
                 if (!removed) return;
                 var left = tr.querySelectorAll('.port-list .badge').length;
@@ -719,6 +660,8 @@
             purgeForm.addEventListener('submit', function (e) {
                 e.preventDefault();
                 var input = document.getElementById('purgePort');
+                var protoEl = document.getElementById('purgeProto');
+                var proto = protoEl ? protoEl.value : 'both';
                 var port = parseInt((input.value || '').trim(), 10);
                 if (!port || port < 1 || port > 65535) {
                     showToast('Введите номер порта от 1 до 65535');
@@ -731,11 +674,14 @@
                 fetch('{{ url_for("api_ports_purge") }}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ port: port, update_schedules: withSchedules })
+                    body: JSON.stringify({ port: port, proto: proto,
+                                           update_schedules: withSchedules })
                 }).then(function (r) { return r.json(); }).then(function (res) {
                     if (res.error) { showToast(res.error); return; }
-                    stripPortFromTable(port);
-                    var text = 'Порт ' + port + ' убран из таблицы, записей: ' + res.deleted;
+                    stripPortFromTable(port, proto);
+                    var protoText = proto === 'tcp' ? 'TCP' : proto === 'udp' ? 'UDP' : 'TCP и UDP';
+                    var text = 'Порт ' + port + ' (' + protoText + ') убран из таблицы, записей: '
+                        + res.deleted;
                     if (res.schedules_updated) {
                         text += ' · расписаний обновлено: ' + res.schedules_updated;
                     }

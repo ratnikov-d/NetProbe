@@ -7,7 +7,7 @@
     <h2>Периодическое сканирование</h2>
 </div>
 
-{% if current_user.can_manage %}
+{% if current_user.can('schedules') %}
 <div class="card mb-4">
     <div class="card-header">Новое расписание</div>
     <div class="card-body">
@@ -131,7 +131,7 @@
                     <td class="small-muted nowrap">{{ s['last_run']|dt }}</td>
                     <td class="small-muted nowrap">{{ s['next_run']|dt }}</td>
                     <td class="text-end nowrap">
-                        {% if current_user.can_manage %}
+                        {% if current_user.can('schedules') %}
                         <div class="d-inline-flex gap-1">
                             <button class="btn btn-sm btn-outline-secondary edit-sched" type="button"
                                     data-id="{{ s['id'] }}"
@@ -172,7 +172,7 @@
     </div>
 </div>
 
-{% if current_user.can_manage %}
+{% if current_user.can('schedules') %}
 <div class="modal fade" id="schedEditModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">

@@ -891,6 +891,46 @@ pre.log {
 }
 
 .np-purge__input { width: 90px; flex: 0 0 auto; }
+.np-purge__proto { width: 120px; flex: 0 0 auto; }
+
+/* незаметная панель под таблицей */
+.np-purge-wrap {
+    margin-top: .5rem;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+.np-purge-wrap > summary {
+    cursor: pointer;
+    display: inline-block;
+    padding: .15rem 0;
+}
+
+.np-purge-wrap > summary:hover { color: var(--text); }
+
+.np-purge-wrap .np-purge {
+    margin-top: .5rem;
+    margin-bottom: 0;
+    background: transparent;
+    border-style: dashed;
+}
+
+/* группы пользователей: переключатели прав */
+.np-perms {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem 1.1rem;
+}
+
+.np-perms .form-check { margin-bottom: 0; }
+.np-perms .form-check-label { white-space: normal; font-size: .82rem; }
+
+.np-usergroup {
+    padding: .8rem 0;
+    border-top: 1px solid var(--line);
+}
+
+.np-usergroup:first-of-type { border-top: 0; }
 
 /* длинные списки портов переносятся, а не растягивают таблицу */
 .np-ports { overflow-wrap: anywhere; word-break: break-word; }

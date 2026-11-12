@@ -17,7 +17,7 @@
                     <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
                        href="{{ url_for('dashboard') }}">Результаты</a>
                 </li>
-                {% if current_user.can_manage %}
+                {% if current_user.can('scan') %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint == 'quick' %}active{% endif %}"
                        href="{{ url_for('quick') }}">Разовое сканирование</a>
@@ -35,7 +35,7 @@
                     <a class="nav-link {% if request.endpoint == 'alerts' %}active{% endif %}"
                        href="{{ url_for('alerts') }}">События</a>
                 </li>
-                {% if current_user.can_manage %}
+                {% if current_user.can('settings') or current_user.can('users') %}
                 <li class="nav-item">
                     <a class="nav-link {% if request.endpoint in ('settings', 'users') %}active{% endif %}"
                        href="{{ url_for('settings') }}">Настройки</a>
@@ -89,13 +89,30 @@
             новых <span id="progOpened">0</span>
         </span>
     </span>
-    {% if current_user.can_manage %}
+    {% if current_user.can('scan') %}
     <button type="button" class="scan-chip__stop" id="stopBtn">Остановить</button>
     {% endif %}
 </div>
 {% endif %}
 
 <div id="npToast" class="np-toast" role="status" aria-live="polite"></div>
+
+<div class="modal fade" id="hostHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">История адреса <code id="hostHistoryIp"></code></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div id="hostHistoryBody" class="np-history">Загрузка…</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <footer class="app-footer">
     <div class="container d-flex flex-wrap justify-content-between gap-2">

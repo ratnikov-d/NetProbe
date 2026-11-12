@@ -109,12 +109,34 @@ ROLE_LABELS = {
 
 MANAGE_ROLES = (ROLE_ADMIN, ROLE_SECURITY)
 
+# Права, которые администратор включает переключателями в группах пользователей
+PERMISSIONS = [
+    ('scan', 'Сканирование', 'Разовое сканирование и проверка выбранных адресов'),
+    ('schedules', 'Расписания', 'Создание, изменение, запуск и удаление расписаний'),
+    ('hosts', 'Адреса', 'Группы, комментарии, пауза и массовые действия'),
+    ('purge', 'Удаление портов', 'Убирать порт из результатов и из расписаний'),
+    ('settings', 'Настройки', 'Оповещения и параметры системы'),
+    ('users', 'Пользователи', 'Пользователи, группы и их права'),
+]
+PERMISSION_KEYS = [key for key, _label, _hint in PERMISSIONS]
+PERMISSION_LABELS = {key: label for key, label, _hint in PERMISSIONS}
+ALL_PERMS = set(PERMISSION_KEYS)
+
+# что может роль без группы
+ROLE_DEFAULT_PERMS = {
+    ROLE_ADMIN: ALL_PERMS,
+    ROLE_SECURITY: {'scan', 'schedules', 'hosts', 'purge', 'settings'},
+    ROLE_USER: set(),
+}
+
 app.jinja_env.globals.update(
     ROLE_LABELS=ROLE_LABELS,
     MANAGE_ROLES=MANAGE_ROLES,
     ROLE_ADMIN=ROLE_ADMIN,
     ROLE_SECURITY=ROLE_SECURITY,
     ROLE_USER=ROLE_USER,
+    PERMISSIONS=PERMISSIONS,
+    PERMISSION_LABELS=PERMISSION_LABELS,
 )
 
 _stop_flags = {}
@@ -154,6 +176,15 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             role TEXT DEFAULT 'user'
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS user_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            perms TEXT DEFAULT '',
+            created_at TEXT
         )
     ''')
     cur.execute('''
@@ -261,6 +292,7 @@ def init_db():
     ensure_column(conn, 'hosts', 'updated_at', 'TEXT')
     ensure_column(conn, 'users', 'created_at', 'TEXT')
     ensure_column(conn, 'users', 'last_login', 'TEXT')
+    ensure_column(conn, 'users', 'group_id', 'INTEGER')
     ensure_column(conn, 'port_state', 'misses', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'schedules', 'udp_ports', 'TEXT')
     ensure_column(conn, 'scan_logs', 'udp_ports', 'TEXT')
@@ -302,14 +334,30 @@ class User(UserMixin):
         self.id = str(row['id'])
         self.username = row['username']
         self.role = row['role']
+        keys = row.keys()
+        self.group_id = row['group_id'] if 'group_id' in keys else None
+        self.group_name = row['group_name'] if 'group_name' in keys else None
+        raw_group_perms = row['group_perms'] if 'group_perms' in keys else None
+        if self.role == ROLE_ADMIN:
+            self.perms = set(ALL_PERMS)
+        elif self.group_id and self.group_name is not None:
+            # группа назначена — права берём из неё, а не из роли
+            self.perms = {p.strip() for p in (raw_group_perms or '').split(',')
+                          if p.strip() in ALL_PERMS}
+        else:
+            self.perms = set(ROLE_DEFAULT_PERMS.get(self.role, set()))
 
     @property
     def role_label(self):
         return ROLE_LABELS.get(self.role, self.role)
 
+    def can(self, perm):
+        return perm in self.perms
+
     @property
     def can_manage(self):
-        return self.role in MANAGE_ROLES
+        # совместимость: «может что-то менять», кроме управления пользователями
+        return bool(self.perms - {'users'})
 
     @property
     def is_admin(self):
@@ -326,9 +374,26 @@ login_manager.login_message_category = 'warning'
 @login_manager.user_loader
 def load_user(user_id):
     conn = db()
-    row = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    row = conn.execute(
+        'SELECT u.*, g.name AS group_name, g.perms AS group_perms '
+        'FROM users u LEFT JOIN user_groups g ON g.id = u.group_id '
+        'WHERE u.id = ?', (user_id,)).fetchone()
     conn.close()
     return User(row) if row else None
+
+
+def permission_required(*perms):
+    """Пускает, если у пользователя есть хотя бы одно из прав."""
+    def decorator(view):
+        @wraps(view)
+        @login_required
+        def wrapper(*args, **kwargs):
+            if not any(current_user.can(p) for p in perms):
+                flash('Недостаточно прав для этого действия', 'danger')
+                return redirect(url_for('dashboard'))
+            return view(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def role_required(*roles):
@@ -903,15 +968,18 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                 conn.execute('INSERT INTO port_state_udp '
                              '(ip, port, first_seen, last_seen) VALUES (?, ?, ?, ?)',
                              (ip, port, now, now))
+                # запись в историю делаем всегда, чтобы по адресу была видна
+                # вся история, начиная с первого сканирования
+                conn.execute('INSERT INTO alerts '
+                             '(ip, port, action, timestamp, message) '
+                             "VALUES (?, ?, 'opened', ?, ?)",
+                             (ip, port, now,
+                              f'Новый открытый UDP-порт {port} на {ip}'))
                 if ip in suppress:
+                    # первый скан адреса: фиксируем порт, но уведомление не шлём
                     add_event(conn, log_id, 'info',
                               f'первый скан UDP {ip}:{port} — без алерта')
                 else:
-                    conn.execute('INSERT INTO alerts '
-                                 '(ip, port, action, timestamp, message) '
-                                 "VALUES (?, ?, 'opened', ?, ?)",
-                                 (ip, port, now,
-                                  f'Новый открытый UDP-порт {port} на {ip}'))
                     add_event(conn, log_id, 'opened',
                               f'НОВЫЙ ОТКРЫТЫЙ UDP-ПОРТ {ip}:{port}')
                     notify_async(f'Новый открытый UDP-порт {port} на {ip}')
@@ -1051,14 +1119,16 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
             else:
                 conn.execute('INSERT INTO port_state (ip, port, first_seen, last_seen) '
                              'VALUES (?, ?, ?, ?)', (ip, port, now, now))
+                # запись в историю делаем всегда, чтобы по адресу была видна
+                # вся история, начиная с первого сканирования
+                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
+                             "VALUES (?, ?, 'opened', ?, ?)",
+                             (ip, port, now, f'Новый открытый порт {port} на {ip}'))
                 if ip in suppress:
-                    # первый скан адреса: фиксируем порт, но алерт не шлём
+                    # первый скан адреса: фиксируем порт, но уведомление не шлём
                     add_event(conn, log_id, 'info',
                               f'первый скан {ip}:{port} — без алерта')
                 else:
-                    conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
-                                 "VALUES (?, ?, 'opened', ?, ?)",
-                                 (ip, port, now, f'Новый открытый порт {port} на {ip}'))
                     add_event(conn, log_id, 'opened', f'НОВЫЙ ОТКРЫТЫЙ ПОРТ {ip}:{port}')
                     notify_async(f'Новый открытый порт {port} на {ip}')
                 opened += 1
@@ -1834,7 +1904,7 @@ def _add_schedule(ip, tcp_ports, udp_ports, minutes):
 
 
 @app.route('/quick', methods=['GET', 'POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def quick():
     cleanup_quick_jobs()
     form = ScanForm()
@@ -1924,7 +1994,7 @@ def quick_status(job_id):
 
 
 @app.route('/quick/add', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def quick_add():
     ip = (request.form.get('ip') or '').strip()
     tcp_ports = (request.form.get('ports') or '').strip() or DEFAULT_PORTS_STR
@@ -1950,7 +2020,7 @@ def quick_add():
 
 
 @app.route('/quick/add-bulk', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def quick_add_bulk():
     tcp_ports = (request.form.get('ports') or '').strip() or DEFAULT_PORTS_STR
     udp_ports = (request.form.get('udp_ports') or '').strip()
@@ -2047,7 +2117,7 @@ def schedules():
 
 
 @app.route('/schedules/<int:sid>/toggle', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('schedules')
 def schedule_toggle(sid):
     conn = db()
     row = conn.execute('SELECT * FROM schedules WHERE id = ?', (sid,)).fetchone()
@@ -2069,7 +2139,7 @@ def schedule_toggle(sid):
 
 
 @app.route('/schedules/<int:sid>/run', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('schedules')
 def schedule_run(sid):
     conn = db()
     row = conn.execute('SELECT * FROM schedules WHERE id = ?', (sid,)).fetchone()
@@ -2104,7 +2174,7 @@ def schedule_run(sid):
 
 
 @app.route('/schedules/<int:sid>/update', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('schedules')
 def schedule_update(sid):
     conn = db()
     row = conn.execute('SELECT * FROM schedules WHERE id = ?', (sid,)).fetchone()
@@ -2154,7 +2224,7 @@ def schedule_update(sid):
 
 
 @app.route('/schedules/<int:sid>/delete', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('schedules')
 def schedule_delete(sid):
     conn = db()
     row = conn.execute('SELECT * FROM schedules WHERE id = ?', (sid,)).fetchone()
@@ -2217,7 +2287,7 @@ def alerts():
 
 
 @app.route('/settings', methods=['GET', 'POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('settings')
 def settings():
     if request.method == 'POST':
         values = {}
@@ -2234,7 +2304,7 @@ def settings():
 
 
 @app.route('/settings/groups')
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def settings_groups():
     conn = db()
     rows = conn.execute(
@@ -2248,7 +2318,7 @@ def settings_groups():
 
 
 @app.route('/settings/test/<channel>', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('settings')
 def settings_test(channel):
     sender = CHANNEL_SENDERS.get(channel)
     if not sender:
@@ -2292,7 +2362,7 @@ def _admin_count():
 
 
 @app.route('/settings/users', methods=['GET', 'POST'])
-@role_required(ROLE_ADMIN)
+@permission_required('users')
 def users():
     form = UserForm()
     if request.method == 'GET':
@@ -2325,14 +2395,149 @@ def users():
         return redirect(url_for('users'))
 
     conn = db()
-    rows = conn.execute('SELECT id, username, role, created_at, last_login '
-                        'FROM users ORDER BY id').fetchall()
+    rows = conn.execute(
+        'SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.group_id, '
+        'g.name AS group_name '
+        'FROM users u LEFT JOIN user_groups g ON g.id = u.group_id '
+        'ORDER BY u.id').fetchall()
+    groups = conn.execute('SELECT * FROM user_groups ORDER BY name').fetchall()
+    counts = {r['group_id']: r['c'] for r in conn.execute(
+        'SELECT group_id, COUNT(*) AS c FROM users WHERE group_id IS NOT NULL '
+        'GROUP BY group_id')}
     conn.close()
-    return render_template('users.html', form=form, users=rows, title='Пользователи')
+    return render_template('users.html', form=form, users=rows, user_groups=groups,
+                           counts=counts, title='Пользователи')
+
+
+# --------------------------------------------------- группы пользователей
+
+
+def _split_perms(raw):
+    return {p.strip() for p in (raw or '').split(',') if p.strip() in ALL_PERMS}
+
+
+@app.route('/settings/user-groups', methods=['POST'])
+@role_required(ROLE_ADMIN)
+def user_group_create():
+    name = (request.form.get('name') or '').strip()
+    description = (request.form.get('description') or '').strip()
+    perms = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
+    if not name:
+        flash('Название группы не может быть пустым', 'danger')
+        return redirect(url_for('users'))
+    if len(name) > 40:
+        flash('Название группы — не длиннее 40 символов', 'danger')
+        return redirect(url_for('users'))
+    conn = db()
+    exists = conn.execute('SELECT 1 FROM user_groups WHERE name = ?',
+                          (name,)).fetchone()
+    if exists:
+        conn.close()
+        flash('Группа с таким названием уже есть', 'danger')
+        return redirect(url_for('users'))
+    conn.execute('INSERT INTO user_groups (name, description, perms, created_at) '
+                 'VALUES (?, ?, ?, ?)',
+                 (name, description, ','.join(perms),
+                  datetime.now().isoformat(timespec='seconds')))
+    conn.commit()
+    conn.close()
+    flash(f'Группа «{name}» создана, прав: {len(perms)}', 'success')
+    return redirect(url_for('users'))
+
+
+@app.route('/settings/user-groups/<int:group_id>/update', methods=['POST'])
+@role_required(ROLE_ADMIN)
+def user_group_update(group_id):
+    conn = db()
+    row = conn.execute('SELECT * FROM user_groups WHERE id = ?',
+                       (group_id,)).fetchone()
+    if not row:
+        conn.close()
+        flash('Группа не найдена', 'danger')
+        return redirect(url_for('users'))
+
+    name = (request.form.get('name') or '').strip() or row['name']
+    description = (request.form.get('description') or '').strip()
+    perms = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
+    if len(name) > 40:
+        conn.close()
+        flash('Название группы — не длиннее 40 символов', 'danger')
+        return redirect(url_for('users'))
+    clash = conn.execute('SELECT 1 FROM user_groups WHERE name = ? AND id != ?',
+                         (name, group_id)).fetchone()
+    if clash:
+        conn.close()
+        flash('Группа с таким названием уже есть', 'danger')
+        return redirect(url_for('users'))
+
+    conn.execute('UPDATE user_groups SET name = ?, description = ?, perms = ? '
+                 'WHERE id = ?', (name, description, ','.join(perms), group_id))
+    conn.commit()
+    conn.close()
+    flash(f'Группа «{name}» сохранена, прав: {len(perms)}', 'success')
+    return redirect(url_for('users'))
+
+
+@app.route('/settings/user-groups/<int:group_id>/delete', methods=['POST'])
+@role_required(ROLE_ADMIN)
+def user_group_delete(group_id):
+    conn = db()
+    row = conn.execute('SELECT * FROM user_groups WHERE id = ?',
+                       (group_id,)).fetchone()
+    if not row:
+        conn.close()
+        flash('Группа не найдена', 'danger')
+        return redirect(url_for('users'))
+    users_count = conn.execute('SELECT COUNT(*) AS c FROM users WHERE group_id = ?',
+                               (group_id,)).fetchone()['c']
+    conn.execute('UPDATE users SET group_id = NULL WHERE group_id = ?', (group_id,))
+    conn.execute('DELETE FROM user_groups WHERE id = ?', (group_id,))
+    conn.commit()
+    conn.close()
+    flashed = f'Группа «{row["name"]}» удалена'
+    if users_count:
+        flashed += f', у {users_count} пользователей теперь права по роли'
+    flash(flashed, 'success')
+    return redirect(url_for('users'))
+
+
+@app.route('/settings/users/<int:user_id>/group', methods=['POST'])
+@permission_required('users')
+def user_group_assign(user_id):
+    row = _user_or_none(user_id)
+    if not row:
+        flash('Пользователь не найден', 'danger')
+        return redirect(url_for('users'))
+    if row['role'] == ROLE_ADMIN and not current_user.is_admin:
+        flash('Менять группу администратора может только администратор', 'danger')
+        return redirect(url_for('users'))
+    if not current_user.is_admin:
+        flash('Назначать группы может только администратор', 'danger')
+        return redirect(url_for('users'))
+
+    raw = (request.form.get('group_id') or '').strip()
+    group_id = None
+    if raw:
+        try:
+            group_id = int(raw)
+        except ValueError:
+            flash('Некорректная группа', 'danger')
+            return redirect(url_for('users'))
+    conn = db()
+    if group_id is not None and not conn.execute(
+            'SELECT 1 FROM user_groups WHERE id = ?', (group_id,)).fetchone():
+        conn.close()
+        flash('Группа не найдена', 'danger')
+        return redirect(url_for('users'))
+    conn.execute('UPDATE users SET group_id = ? WHERE id = ?', (group_id, user_id))
+    conn.commit()
+    conn.close()
+    flash(f'Группа пользователя {row["username"]} обновлена', 'success')
+    return redirect(url_for('users'))
 
 
 @app.route('/settings/users/<int:user_id>/role', methods=['POST'])
-@role_required(ROLE_ADMIN)
+@permission_required('users')
 def user_role(user_id):
     row = _user_or_none(user_id)
     if not row:
@@ -2362,7 +2567,7 @@ def user_role(user_id):
 
 
 @app.route('/settings/users/<int:user_id>/password', methods=['POST'])
-@role_required(ROLE_ADMIN)
+@permission_required('users')
 def user_password(user_id):
     row = _user_or_none(user_id)
     if not row:
@@ -2387,7 +2592,7 @@ def user_password(user_id):
 
 
 @app.route('/settings/users/<int:user_id>/delete', methods=['POST'])
-@role_required(ROLE_ADMIN)
+@permission_required('users')
 def user_delete(user_id):
     row = _user_or_none(user_id)
     if not row:
@@ -2415,7 +2620,7 @@ def user_delete(user_id):
 
 
 @app.route('/ip/<ip>/pause', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def ip_pause(ip):
     try:
         ip_to_int(ip)
@@ -2434,7 +2639,7 @@ def ip_pause(ip):
 
 
 @app.route('/ip/<ip>/scan', methods=['POST'])
-@login_required
+@permission_required('scan')
 def ip_scan(ip):
     """Проверить один адрес сейчас (порты — как в последнем сканировании)."""
     try:
@@ -2459,7 +2664,7 @@ def ip_scan(ip):
 
 
 @app.route('/ip/<ip>/resume', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def ip_resume(ip):
     conn = db()
     conn.execute('DELETE FROM paused_ips WHERE ip = ?', (ip,))
@@ -2473,7 +2678,7 @@ def ip_resume(ip):
 
 
 @app.route('/api/host/meta', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def api_host_meta():
     data = request.get_json(silent=True) or {}
     ip = (data.get('ip') or '').strip()
@@ -2511,7 +2716,7 @@ def api_host_meta():
 
 
 @app.route('/api/groups', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def api_group_create():
     data = request.get_json(silent=True) or {}
     name = ' '.join((data.get('name') or '').split())
@@ -2533,7 +2738,7 @@ def api_group_create():
 
 
 @app.route('/api/groups/<int:group_id>/rename', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def api_group_rename(group_id):
     data = request.get_json(silent=True) or {}
     name = ' '.join((data.get('name') or '').split())[:40]
@@ -2556,7 +2761,7 @@ def api_group_rename(group_id):
 
 
 @app.route('/api/groups/<int:group_id>', methods=['DELETE'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts')
 def api_group_delete(group_id):
     conn = db()
     conn.execute('UPDATE hosts SET group_id = NULL WHERE group_id = ?', (group_id,))
@@ -2567,7 +2772,7 @@ def api_group_delete(group_id):
 
 
 @app.route('/api/ports/purge', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('purge')
 def api_ports_purge():
     """Убирает порт из результатов (TCP и UDP) у всех адресов.
 
@@ -2582,10 +2787,17 @@ def api_ports_purge():
         return jsonify({'error': 'Некорректный порт'}), 400
 
     conn = db()
-    deleted_tcp = conn.execute('DELETE FROM port_state WHERE port = ?',
-                               (port,)).rowcount
-    deleted_udp = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
-                               (port,)).rowcount
+    proto = (data.get('proto') or 'both').lower()
+    if proto not in ('tcp', 'udp', 'both'):
+        proto = 'both'
+    deleted_tcp = 0
+    deleted_udp = 0
+    if proto in ('tcp', 'both'):
+        deleted_tcp = conn.execute('DELETE FROM port_state WHERE port = ?',
+                                   (port,)).rowcount
+    if proto in ('udp', 'both'):
+        deleted_udp = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
+                                   (port,)).rowcount
     deleted = max(deleted_tcp, 0) + max(deleted_udp, 0)
 
     schedules_updated = 0
@@ -2595,12 +2807,15 @@ def api_ports_purge():
             tcp_list = [p.strip() for p in (row['ports'] or '').split(',') if p.strip()]
             udp_list = [p.strip() for p in (row['udp_ports'] or '').split(',')
                         if p.strip()]
-            tcp_after = [p for p in tcp_list if p != target]
-            udp_after = [p for p in udp_list if p != target]
-            if not tcp_after:
-                # расписание не может остаться совсем без TCP-портов:
-                # пустой список означает «порты по умолчанию»
-                tcp_after = tcp_list
+            tcp_after = tcp_list
+            udp_after = udp_list
+            if proto in ('tcp', 'both'):
+                tcp_after = [p for p in tcp_list if p != target]
+                if not tcp_after:
+                    # пустой TCP-список означает «порты по умолчанию»
+                    tcp_after = tcp_list
+            if proto in ('udp', 'both'):
+                udp_after = [p for p in udp_list if p != target]
             if tcp_after == tcp_list and udp_after == udp_list:
                 continue
             conn.execute('UPDATE schedules SET ports = ?, udp_ports = ? WHERE id = ?',
@@ -2615,7 +2830,7 @@ def api_ports_purge():
 
 
 @app.route('/api/hosts/bulk', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('hosts', 'scan')
 def api_hosts_bulk():
     data = request.get_json(silent=True) or {}
     action = data.get('action')
@@ -2731,12 +2946,26 @@ def api_host_history(ip):
     conn = db()
     rows = conn.execute(
         'SELECT port, action, timestamp FROM alerts WHERE ip = ? '
-        'ORDER BY timestamp DESC, id DESC LIMIT 500', (ip,)).fetchall()
+        'ORDER BY timestamp ASC, id ASC', (ip,)).fetchall()
+
+    # если по порту нет записи об открытии (старые сканы, подавленные
+    # уведомления), показываем первое обнаружение из port_state
+    opened_now = {r['port'] for r in rows if r['action'] == 'opened'}
+    synthetic = []
+    for table in ('port_state', 'port_state_udp'):
+        for r in conn.execute(
+                f'SELECT port, first_seen FROM {table} WHERE ip = ?', (ip,)):
+            if r['port'] not in opened_now:
+                synthetic.append({'port': r['port'], 'action': 'opened',
+                                  'timestamp': r['first_seen']})
     conn.close()
+
+    everything = [dict(r) for r in rows] + synthetic
+    everything.sort(key=lambda r: (r['timestamp'] or '', r['action'] or ''))
 
     events = []
     index = {}
-    for row in rows:
+    for row in everything:
         key = (row['timestamp'], row['action'])
         item = index.get(key)
         if item is None:
@@ -2845,7 +3074,7 @@ def api_events():
 
 
 @app.route('/api/scan/stop', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def api_stop():
     data = request.get_json(silent=True) or {}
     log_id = data.get('log_id') or request.form.get('log_id', type=int) \
@@ -2858,7 +3087,7 @@ def api_stop():
 
 
 @app.route('/scan/stop/<int:log_id>', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def stop_scan_form(log_id):
     if request_stop(log_id):
         flash(f'Останавливаю задание #{log_id}…', 'warning')
@@ -2868,7 +3097,7 @@ def stop_scan_form(log_id):
 
 
 @app.route('/api/scan', methods=['POST'])
-@role_required(*MANAGE_ROLES)
+@permission_required('scan')
 def api_scan():
     data = request.get_json(silent=True) or {}
     try:
