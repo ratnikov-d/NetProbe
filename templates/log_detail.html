@@ -20,26 +20,35 @@
         <div class="row small">
             <div class="col-md-3"><span class="text-muted">Диапазон:</span>
                 <code>{{ job['ip_range'] }}</code></div>
-            <div class="col-md-3"><span class="text-muted">Порты:</span> {{ job['ports'] }}</div>
-            <div class="col-md-2"><span class="text-muted">Потоков:</span> {{ job['workers'] or '—' }}</div>
-            <div class="col-md-2"><span class="text-muted">Статус:</span> {{ job['status']|status_ru }}</div>
-            <div class="col-md-2"><span class="text-muted">Новых портов:</span> {{ job['open_found'] or 0 }}</div>
+            <div class="col-md-6 np-ports-cell">
+                <div><span class="text-muted">TCP:</span>
+                    <span class="np-ports">{{ job['ports'] or '—' }}</span></div>
+                <div class="mt-1"><span class="text-muted">UDP:</span>
+                    <span class="np-ports">{{ job['udp_ports'] or '—' }}</span></div>
+            </div>
+            <div class="col-md-3"><span class="text-muted">Потоков:</span> {{ job['workers'] or '—' }}</div>
         </div>
         <div class="row small mt-2">
             <div class="col-md-3"><span class="text-muted">Начало:</span> {{ job['start_time']|dt }}</div>
             <div class="col-md-3"><span class="text-muted">Конец:</span> {{ job['end_time']|dt }}</div>
-            <div class="col-md-3"><span class="text-muted">Проверено:</span>
-                {{ job['done'] or 0 }} из {{ job['total'] or 0 }}</div>
-            <div class="col-md-3"><span class="text-muted">Источник:</span>
+            <div class="col-md-2"><span class="text-muted">Статус:</span> {{ job['status']|status_ru }}</div>
+            <div class="col-md-2"><span class="text-muted">Новых портов:</span> {{ job['open_found'] or 0 }}</div>
+            <div class="col-md-2"><span class="text-muted">Источник:</span>
                 {% if job['schedule_id'] %}расписание #{{ job['schedule_id'] }}{% else %}вручную{% endif %}
             </div>
         </div>
-        {% set total = job['total'] or 0 %}
-        {% set done = job['done'] or 0 %}
-        {% set percent = (done * 100 / total) if total else 0 %}
+        {% set op = overall_progress(job) %}
         <div class="progress mt-3" style="height: 18px;">
             <div class="progress-bar {% if job['status'] == 'completed' %}bg-success{% elif job['status'] == 'running' %}bg-warning progress-bar-striped progress-bar-animated{% else %}bg-secondary{% endif %}"
-                 style="width: {{ '%.1f'|format(percent) }}%">{{ '%.0f'|format(percent) }}%</div>
+                 id="jobBar"
+                 style="width: {{ '%.1f'|format(op.percent) }}%">{{ '%.0f'|format(op.percent) }}%</div>
+        </div>
+        <div class="small-muted mt-1" id="jobProgress">
+            {% if job['status'] == 'running' %}
+            {{ op.done }} / {{ op.total }} проверок
+            {% else %}
+            {{ job['done'] or 0 }} / {{ job['total'] or 0 }} проверок
+            {% endif %}
         </div>
     </div>
 </div>
@@ -84,6 +93,36 @@
 <script>
 (function () {
     var lastId = {{ events[-1]['id'] if events else 0 }};
+    var jobId = {{ job['id'] }};
+    var wasRunning = true;
+
+    function pollProgress() {
+        fetch('{{ url_for("api_progress") }}?log_id=' + jobId)
+            .then(function (r) { return r.json(); })
+            .then(function (p) {
+                if (!p || !p.log_id) return;
+                var bar = document.getElementById('jobBar');
+                var lbl = document.getElementById('jobProgress');
+                if (bar) {
+                    bar.style.width = p.percent_total + '%';
+                    bar.textContent = Math.round(p.percent_total) + '%';
+                    if (p.status !== 'running' && wasRunning) {
+                        wasRunning = false;
+                        bar.classList.remove('progress-bar-striped', 'progress-bar-animated',
+                                             'bg-warning');
+                        bar.classList.add('bg-success');
+                    }
+                }
+                if (lbl) {
+                    lbl.textContent = p.done_all + ' / ' + p.total_all + ' проверок';
+                }
+            })
+            .catch(function () {});
+    }
+
+    pollProgress();
+    setInterval(pollProgress, 1500);
+
     function poll() {
         fetch('{{ url_for("api_events") }}?log_id={{ job["id"] }}&after=' + lastId)
             .then(function (r) { return r.json(); })

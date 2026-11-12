@@ -839,6 +839,20 @@ pre.log {
 
 .table-responsive { border-radius: var(--radius); }
 
+/* длинные списки портов переносятся, а не растягивают таблицу */
+.np-ports { overflow-wrap: anywhere; word-break: break-word; }
+
+.np-ports-cell { max-width: 340px; }
+
+/* история сканирований: не держим колонки в одну строку, иначе таблица
+   шире экрана на ноутбуке */
+#logsTable .nowrap,
+#logsTable th { white-space: normal; }
+
+#logsTable td, #logsTable th { vertical-align: top; }
+
+.last-scan { margin-bottom: .85rem; }
+
 .app-footer {
     border-top: 1px solid var(--line);
     padding: 1rem 0;
@@ -866,5 +880,4 @@ pre.log {
 
 .settings-group__title { font-weight: 700; margin: 0; font-size: 1rem; }
 
-.form-check-label { white-space: normal; }
-.settings-group .btn { white-space: nowrap; }
+.form-check-label { white-space: normal; }.settings-group .btn { white-space: nowrap; }

@@ -28,7 +28,7 @@
                     <th data-sort="range">Диапазон <span class="sort-mark"></span></th>
                     <th data-sort="ports">Порты <span class="sort-mark"></span></th>
                     <th data-sort="status">Статус <span class="sort-mark"></span></th>
-                    <th data-sort="progress" style="min-width: 150px;">Прогресс <span class="sort-mark"></span></th>
+                    <th data-sort="progress" style="min-width: 120px;">Прогресс <span class="sort-mark"></span></th>
                     <th data-sort="open">Новых портов <span class="sort-mark"></span></th>
                     <th data-sort="start">Начало <span class="sort-mark"></span></th>
                     <th data-sort="end">Конец <span class="sort-mark"></span></th>
@@ -39,13 +39,13 @@
                 {% for job in logs %}
                 {% set total = job['total'] or 0 %}
                 {% set done = job['done'] or 0 %}
-                {% set percent = (done * 100 / total) if total else 0 %}
+                {% set op = overall_progress(job) %}
                 <tr data-row
                     data-log-id="{{ job['id'] }}"
                     data-range="{{ job['ip_range'] }}"
                     data-ports="{{ job['ports'] }}"
                     data-status="{{ job['status'] }}"
-                    data-progress="{{ '%.1f'|format(percent) }}"
+                    data-progress="{{ '%.1f'|format(op.percent) }}"
                     data-open="{{ job['open_found'] or 0 }}"
                     data-start="{{ job['start_time'] or '' }}"
                     data-end="{{ job['end_time'] or '' }}">
@@ -56,10 +56,10 @@
                             · #{{ job['id'] }}
                         </div>
                     </td>
-                    <td class="mono small-muted" style="min-width: 220px;">
-                        <div><span class="badge badge-port me-1">TCP</span>{{ job['ports'] }}</div>
+                    <td class="mono small-muted np-ports-cell">
+                        <div><span class="badge badge-port me-1">TCP</span><span class="np-ports">{{ job['ports'] }}</span></div>
                         {% if job['udp_ports'] %}
-                        <div class="mt-1"><span class="badge badge-port-udp me-1">UDP</span>{{ job['udp_ports'] }}</div>
+                        <div class="mt-1"><span class="badge badge-port-udp me-1">UDP</span><span class="np-ports">{{ job['udp_ports'] }}</span></div>
                         {% endif %}
                     </td>
                     <td class="nowrap">
@@ -77,9 +77,15 @@
                         <div class="progress" style="height: 14px;">
                             <div class="progress-bar {% if job['status'] == 'completed' %}bg-success{% elif job['status'] == 'running' %}bg-warning{% else %}bg-secondary{% endif %}"
                                  id="bar-{{ job['id'] }}"
-                                 style="width: {{ '%.1f'|format(percent) }}%"></div>
+                                 style="width: {{ '%.1f'|format(op.percent) }}%"></div>
                         </div>
-                        <span class="small-muted" id="prog-{{ job['id'] }}">{{ done }} / {{ total }}</span>
+                        <span class="small-muted" id="prog-{{ job['id'] }}">
+                            {% if job['status'] == 'running' %}
+                            {{ '%.0f'|format(op.percent) }}% · {{ op.done }} / {{ op.total }}
+                            {% else %}
+                            {{ done }} / {{ total }}
+                            {% endif %}
+                        </span>
                     </td>
                     <td class="nowrap">{{ job['open_found'] or 0 }}</td>
                     <td class="small-muted nowrap">{{ job['start_time']|dt }}</td>
@@ -125,8 +131,11 @@
                     if (p.status === 'running') {
                         var bar = document.getElementById('bar-' + id);
                         var lbl = document.getElementById('prog-' + id);
-                        if (bar) bar.style.width = p.percent + '%';
-                        if (lbl) lbl.textContent = p.done + ' / ' + p.total;
+                        if (bar) bar.style.width = p.percent_total + '%';
+                        if (lbl) {
+                            lbl.textContent = Math.round(p.percent_total) + '% · ' +
+                                p.done_all + ' / ' + p.total_all;
+                        }
                     } else {
                         clearInterval(timer);
                         if (window.keepScrollReload) window.keepScrollReload();

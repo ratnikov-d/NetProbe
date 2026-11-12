@@ -23,13 +23,25 @@
     <pre class="log" id="liveLog" style="max-height: 190px; overflow-y: auto;">загрузка…</pre>
 </details>
 
-<p class="text-muted small">
+<div class="last-scan small">
     {% if last_scan %}
-    Последний запуск: {{ last_scan['ip_range'] }} &middot; порты: {{ last_scan['ports'] }}
-    &middot; {{ last_scan['start_time']|dt }}
-    {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time']|dt }}{% endif %}
+    <div class="text-muted">
+        Последний запуск: <code>{{ last_scan['ip_range'] }}</code>
+        &middot; {{ last_scan['start_time']|dt }}
+        {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time']|dt }}{% endif %}
+    </div>
+    <div class="np-ports-cell mt-1">
+        <span class="badge badge-port me-1">TCP</span>
+        <span class="np-ports text-muted">{{ last_scan['ports'] or '—' }}</span>
+    </div>
+    {% if last_scan['udp_ports'] %}
+    <div class="np-ports-cell mt-1">
+        <span class="badge badge-port-udp me-1">UDP</span>
+        <span class="np-ports text-muted">{{ last_scan['udp_ports'] }}</span>
+    </div>
     {% endif %}
-</p>
+    {% endif %}
+</div>
 
 {% if udp53_hosts and current_user.can_manage %}
 <div class="np-note" id="udp53Note">

@@ -1733,6 +1733,8 @@ def dashboard():
 _quick_jobs = {}
 _quick_lock = threading.Lock()
 QUICK_TTL = 1800
+# разовое сканирование: /24 с TCP- и UDP-портами даёт около 8000 проверок
+QUICK_MAX_CHECKS = int(os.environ.get('QUICK_MAX_CHECKS', '20000'))
 
 
 def quick_worker(job_id, ips, tcp_ports, udp_ports, workers):
@@ -1848,10 +1850,11 @@ def quick():
             udp_ports = parse_udp_ports(form.udp_ports.data)
             workers = parse_workers(form.workers.data)
             total = (end_int - start_int + 1) * (len(tcp_ports) + len(udp_ports))
-            if total > 4000:
+            if total > QUICK_MAX_CHECKS:
                 raise ValueError(
-                    'Слишком много проверок ({0}). Максимум 4000 — '
-                    'сузьте диапазон или списки портов'.format(total))
+                    'Слишком много проверок ({0}). Максимум {1} — '
+                    'сузьте диапазон или списки портов'.format(
+                        total, QUICK_MAX_CHECKS))
             ips = []
             for i in range(start_int, end_int + 1):
                 ips.append(int_to_ip(i))
@@ -1904,6 +1907,7 @@ def quick():
                            results=results, summary=summary,
                            default_ports=DEFAULT_PORTS_STR,
                            default_udp=DEFAULT_UDP_PORTS_STR,
+                           quick_max=QUICK_MAX_CHECKS,
                            title='Разовое сканирование')
 
 
@@ -2683,6 +2687,32 @@ def api_hosts_bulk():
 # -------------------------------------------------------------------------- API
 
 
+def overall_progress(job):
+    """Сводный прогресс задания: TCP-сканирование, повторная проверка и UDP.
+
+    Возвращает {'percent', 'done', 'total'} по всем этапам сразу, чтобы цифры
+    в «Логе» совпадали с индикатором на странице."""
+    total = job['total'] or 0
+    done = job['done'] or 0
+    udp_planned = job['udp_planned'] or 0
+    udp_done_all = job['udp_done_all'] or 0
+    verify_total = job['verify_total'] or 0
+    verify_done = job['verify_done'] or 0
+
+    verify_weight = total if done < total else verify_total
+    verify_weight = min(verify_weight, total)
+    all_total = total + udp_planned + verify_weight
+    all_done = (done + min(verify_done, verify_weight)
+                + min(udp_done_all, udp_planned))
+    if job['status'] == 'completed':
+        return {'percent': 100.0, 'done': all_total, 'total': all_total}
+    percent = round(all_done * 100 / all_total, 1) if all_total else 0
+    return {'percent': percent, 'done': all_done, 'total': all_total}
+
+
+app.jinja_env.globals['overall_progress'] = overall_progress
+
+
 @app.route('/api/alerts')
 @login_required
 def api_alerts():
@@ -2714,19 +2744,11 @@ def api_progress():
     verify_total = job['verify_total'] or 0
     verify_done = job['verify_done'] or 0
     percent_verify = round(verify_done * 100 / verify_total, 1) if verify_total else 0
-    # общий прогресс: все проверки задания, включая будущие этапы.
-    # UDP закладываем с запасом на второй проход, повторную проверку TCP — по
-    # размеру основного прохода.
-    udp_planned = job['udp_planned'] or 0
-    udp_done_all = job['udp_done_all'] or 0
-    verify_weight = total if done < total else verify_total
-    verify_weight = min(verify_weight, total)
-    all_total = total + udp_planned + verify_weight
-    all_done = (done + min(verify_done, verify_weight)
-                + min(udp_done_all, udp_planned))
-    percent_total = round(all_done * 100 / all_total, 1) if all_total else 0
-    if job['status'] == 'completed':
-        percent_total = 100.0
+    # общий прогресс: все проверки задания, включая будущие этапы
+    op = overall_progress(job)
+    percent_total = op['percent']
+    all_total = op['total']
+    all_done = op['done']
     phase = 'tcp'
     if job['status'] == 'running' and total and done >= total:
         udp_phase = (job['udp_phase'] or '').strip()
