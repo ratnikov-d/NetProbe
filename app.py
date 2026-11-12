@@ -74,6 +74,22 @@ STATUS_LABELS = {
 }
 app.jinja_env.filters['status_ru'] = lambda s: STATUS_LABELS.get(s, s or '')
 
+
+def fmt_dt(value):
+    """2026-11-12T10:20:19 -> 2026.11.12 10:20:19"""
+    if value in (None, ''):
+        return '—'
+    text = str(value).strip()
+    if len(text) >= 19 and text[4] == '-' and text[7] == '-' and text[10] in 'T ':
+        return f'{text[0:4]}.{text[5:7]}.{text[8:10]} {text[11:19]}'
+    try:
+        return datetime.fromisoformat(text).strftime('%Y.%m.%d %H:%M:%S')
+    except ValueError:
+        return text
+
+
+app.jinja_env.filters['dt'] = fmt_dt
+
 ROLE_ADMIN = 'admin'
 ROLE_SECURITY = 'security'
 ROLE_USER = 'user'

@@ -71,8 +71,8 @@
                     <span class="badge bg-secondary">Пользователь</span>
                     {% endif %}
                 </td>
-                <td class="small text-muted">{{ u['created_at'] or '—' }}</td>
-                <td class="small text-muted">{{ u['last_login'] or 'ещё не входил' }}</td>
+                <td class="small text-muted">{{ u['created_at']|dt }}</td>
+                <td class="small text-muted">{{ u['last_login']|dt if u['last_login'] else 'ещё не входил' }}</td>
                 <td class="text-end text-nowrap">
                     {% if u['role'] == ROLE_ADMIN and not current_user.is_admin %}
                     <span class="text-muted small me-2">роль меняет только администратор</span>

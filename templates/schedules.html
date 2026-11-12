@@ -128,8 +128,8 @@
                         <span class="badge bg-secondary">выключено</span>
                         {% endif %}
                     </td>
-                    <td class="small-muted nowrap">{{ s['last_run'] or '—' }}</td>
-                    <td class="small-muted nowrap">{{ s['next_run'] or '—' }}</td>
+                    <td class="small-muted nowrap">{{ s['last_run']|dt }}</td>
+                    <td class="small-muted nowrap">{{ s['next_run']|dt }}</td>
                     <td class="text-end nowrap">
                         {% if current_user.can_manage %}
                         <div class="d-inline-flex gap-1">

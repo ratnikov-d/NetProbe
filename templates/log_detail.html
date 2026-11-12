@@ -26,8 +26,8 @@
             <div class="col-md-2"><span class="text-muted">Новых портов:</span> {{ job['open_found'] or 0 }}</div>
         </div>
         <div class="row small mt-2">
-            <div class="col-md-3"><span class="text-muted">Начало:</span> {{ job['start_time'] }}</div>
-            <div class="col-md-3"><span class="text-muted">Конец:</span> {{ job['end_time'] or '—' }}</div>
+            <div class="col-md-3"><span class="text-muted">Начало:</span> {{ job['start_time']|dt }}</div>
+            <div class="col-md-3"><span class="text-muted">Конец:</span> {{ job['end_time']|dt }}</div>
             <div class="col-md-3"><span class="text-muted">Проверено:</span>
                 {{ job['done'] or 0 }} из {{ job['total'] or 0 }}</div>
             <div class="col-md-3"><span class="text-muted">Источник:</span>
@@ -55,7 +55,7 @@
                 <tbody id="eventsBody">
                     {% for e in events %}
                     <tr>
-                        <td class="text-muted small text-nowrap">{{ e['timestamp'] }}</td>
+                        <td class="text-muted small text-nowrap">{{ e['timestamp']|dt }}</td>
                         <td>
                             {% if e['level'] == 'opened' %}
                             <span class="badge bg-success">открыт</span>
@@ -97,7 +97,7 @@
                               e.level === 'closed' ? 'bg-secondary' :
                               e.level === 'warning' ? 'bg-warning text-dark' :
                               e.level === 'error' ? 'bg-danger' : 'bg-light text-dark';
-                    tr.innerHTML = '<td class="text-muted small text-nowrap">' + e.timestamp +
+                    tr.innerHTML = '<td class="text-muted small text-nowrap">' + window.npFmtDt(e.timestamp) +
                         '</td><td><span class="badge ' + cls + '">' + e.level +
                         '</span></td><td class="small">' + e.message + '</td>';
                     body.appendChild(tr);

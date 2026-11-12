@@ -29,8 +29,8 @@
 <p class="text-muted small">
     {% if last_scan %}
     Последний запуск: {{ last_scan['ip_range'] }} &middot; порты: {{ last_scan['ports'] }}
-    &middot; {{ last_scan['start_time'] }}
-    {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time'] }}{% endif %}
+    &middot; {{ last_scan['start_time']|dt }}
+    {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time']|dt }}{% endif %}
     {% endif %}
 </p>
 
@@ -120,6 +120,7 @@
                         {% for g in groups %}
                         <option value="{{ g.id }}" {% if data.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
                         {% endfor %}
+                        <option value="__new">+ создать группу…</option>
                     </select>
                     {% else %}
                     {% if data.group %}
@@ -148,8 +149,8 @@
                         {% endfor %}
                     </div>
                 </td>
-                <td class="text-muted small text-nowrap">{{ data.last_seen }}</td>
-                <td class="text-muted small text-nowrap">{{ data.updated }}</td>
+                <td class="text-muted small text-nowrap">{{ data.last_seen|dt }}</td>
+                <td class="text-muted small text-nowrap">{{ data.updated|dt }}</td>
                 <td class="text-end text-nowrap">
                     <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
                           class="d-inline" data-keep-scroll>
@@ -191,6 +192,31 @@
     Группа и комментарий сохраняются сразу после изменения.
 </p>
 
+{% if current_user.can_manage %}
+<div class="modal fade" id="groupFormModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="groupForm" autocomplete="off">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новая группа</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label small" for="groupName">Название группы</label>
+                    <input id="groupName" class="form-control" maxlength="40" required
+                           placeholder="например: web, почта, АРМ бухгалтерии">
+                    <div class="form-text">Так адрес будет подписан в таблице результатов.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Создать</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <script>
 (function () {
     var lastEventId = 0;
@@ -206,7 +232,7 @@
                        e.level === 'closed' ? '○ ' :
                        e.level === 'warning' ? '! ' :
                        e.level === 'error' ? '✖ ' : '· ';
-            box.textContent += mark + e.timestamp + '  ' + e.message + '\n';
+            box.textContent += mark + window.npFmtDt(e.timestamp) + '  ' + e.message + '\n';
         });
         box.scrollTop = box.scrollHeight;
     }
@@ -285,10 +311,82 @@
     }
 
     if (canManage) {
+        var createGroupUrl = '{{ url_for("api_group_create") }}';
+        var groupModalEl = document.getElementById('groupFormModal');
+        var groupModal = groupModalEl ? new bootstrap.Modal(groupModalEl) : null;
+        var groupForm = document.getElementById('groupForm');
+        var groupNameInput = document.getElementById('groupName');
+        var pendingSelect = null;
+        var pendingRow = null;
+
+        if (groupModalEl) {
+            groupModalEl.addEventListener('shown.bs.modal', function () {
+                if (groupNameInput) { groupNameInput.focus(); groupNameInput.select(); }
+            });
+        }
+
+        function groupOptionExists(value) {
+            return !!document.querySelector('.group-select option[value="' + value + '"]');
+        }
+
+        function addGroupOption(group) {
+            var value = String(group.id);
+            if (fGroup && !fGroup.querySelector('option[value="' + value + '"]')) {
+                fGroup.add(new Option(group.name, value));
+            }
+            document.querySelectorAll('.group-select').forEach(function (sel) {
+                if (sel.querySelector('option[value="' + value + '"]')) return;
+                var newOpt = sel.querySelector('option[value="__new"]');
+                var opt = new Option(group.name, value);
+                if (newOpt) sel.insertBefore(opt, newOpt); else sel.add(opt);
+            });
+        }
+
+        function assignGroup(sel, tr, group) {
+            sel.value = String(group.id);
+            sel.dataset.prev = sel.value;
+            tr.dataset.groupid = sel.value;
+            tr.dataset.group = (group.name || '').toLowerCase();
+            saveMeta(tr.dataset.ip, {
+                group_id: group.id,
+                comment: tr.dataset.comment || ''
+            }).then(function (res) { if (res.error) alert(res.error); });
+            applyFilter();
+        }
+
+        if (groupForm) {
+            groupForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var name = groupNameInput.value.trim();
+                if (!name) return;
+                fetch(createGroupUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                }).then(function (r) { return r.json(); }).then(function (g) {
+                    if (g.error) { alert(g.error); groupNameInput.select(); return; }
+                    addGroupOption(g);
+                    var sel = pendingSelect;
+                    var tr = pendingRow;
+                    if (groupModal) groupModal.hide();
+                    if (sel && tr) assignGroup(sel, tr, g);
+                    pendingSelect = null;
+                    pendingRow = null;
+                }).catch(function () { alert('нет связи с сервером'); });
+            });
+        }
+
         document.querySelectorAll('.group-select').forEach(function (sel) {
             sel.dataset.prev = sel.value;
             sel.addEventListener('change', function () {
                 var tr = sel.closest('tr');
+                if (sel.value === '__new') {
+                    sel.value = sel.dataset.prev;
+                    pendingSelect = sel;
+                    pendingRow = tr;
+                    if (groupModal) groupModal.show();
+                    return;
+                }
                 sel.dataset.prev = sel.value;
                 tr.dataset.groupid = sel.value;
                 var opt = sel.options[sel.selectedIndex];

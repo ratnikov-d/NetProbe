@@ -82,8 +82,8 @@
                         <span class="small-muted" id="prog-{{ job['id'] }}">{{ done }} / {{ total }}</span>
                     </td>
                     <td class="nowrap">{{ job['open_found'] or 0 }}</td>
-                    <td class="small-muted nowrap">{{ job['start_time'] }}</td>
-                    <td class="small-muted nowrap">{{ job['end_time'] or '—' }}</td>
+                    <td class="small-muted nowrap">{{ job['start_time']|dt }}</td>
+                    <td class="small-muted nowrap">{{ job['end_time']|dt }}</td>
                     <td class="text-end nowrap">
                         <div class="d-inline-flex gap-1">
                             <a href="{{ url_for('log_detail', log_id=job['id']) }}"

@@ -31,10 +31,10 @@
             <tbody>
                 {% for alert in alerts %}
                 <tr data-row
-                    data-ts="{{ alert['timestamp'] }}"
+                    data-ts="{{ alert['timestamp']|dt }}"
                     data-ip="{{ alert['ip'] }}"
                     data-port="{{ alert['port'] }}">
-                    <td class="small-muted nowrap">{{ alert['timestamp'] }}</td>
+                    <td class="small-muted nowrap">{{ alert['timestamp']|dt }}</td>
                     <td class="mono nowrap">{{ alert['ip'] }}</td>
                     <td><span class="badge badge-port">{{ alert['port'] }}</span></td>
                     <td class="nowrap">

@@ -2,6 +2,17 @@
 (function () {
     'use strict';
 
+    // 2026-11-12T10:20:19 -> 2026.11.12 10:20:19
+    window.npFmtDt = function (value) {
+        if (!value) return '—';
+        var s = String(value).trim();
+        if (s.length >= 19 && s[4] === '-' && s[7] === '-' && (s[10] === 'T' || s[10] === ' ')) {
+            return s.slice(0, 4) + '.' + s.slice(5, 7) + '.' + s.slice(8, 10) +
+                ' ' + s.slice(11, 19);
+        }
+        return s;
+    };
+
     var THEME_KEY = 'ps.theme';
     var SCROLL_KEY = 'ps.scroll';
     var root = document.documentElement;
