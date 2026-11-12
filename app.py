@@ -254,6 +254,8 @@ def init_db():
     ensure_column(conn, 'scan_logs', 'udp_total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'udp_done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'udp_phase', 'TEXT')
+    ensure_column(conn, 'scan_logs', 'udp_planned', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'udp_done_all', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'verify_total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'verify_done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'hosts', 'updated_at', 'TEXT')
@@ -964,18 +966,20 @@ def _run_udp_phase(conn, log_id, targets, workers, suppress, attempts,
                 new_ports = apply_udp_batch(conn, log_id, batch, suppress, count_miss)
                 opened += new_ports
                 processed += len(batch)
-                batch.clear()
                 conn.execute('UPDATE scan_logs SET udp_done = ?, '
+                             'udp_done_all = COALESCE(udp_done_all, 0) + ?, '
                              'open_found = COALESCE(open_found, 0) + ? WHERE id = ?',
-                             (processed, new_ports, log_id))
+                             (processed, len(batch), new_ports, log_id))
+                batch.clear()
                 conn.commit()
     if batch:
         new_ports = apply_udp_batch(conn, log_id, batch, suppress, count_miss)
         opened += new_ports
         processed += len(batch)
         conn.execute('UPDATE scan_logs SET udp_done = ?, '
+                     'udp_done_all = COALESCE(udp_done_all, 0) + ?, '
                      'open_found = COALESCE(open_found, 0) + ? WHERE id = ?',
-                     (processed, new_ports, log_id))
+                     (processed, len(batch), new_ports, log_id))
         conn.commit()
     return opened, unanswered
 
@@ -1246,7 +1250,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     conn = db()
     conn.execute('UPDATE scan_logs SET total = ?, done = 0, open_found = 0, '
-                 'udp_total = 0, udp_done = 0, udp_phase = \'\', '
+                 'udp_total = 0, udp_done = 0, udp_done_all = 0, udp_phase = \'\', '
                  'verify_total = 0, verify_done = 0, '
                  "status = 'running', workers = ? WHERE id = ?",
                  (total, workers, log_id))
@@ -1327,10 +1331,11 @@ def _launch_scan(ips, label, ports_text, ports, udp_text, udp_ports, workers,
     conn = db()
     cur = conn.execute(
         'INSERT INTO scan_logs (ip_range, ports, udp_ports, start_time, status, '
-        'total, workers, schedule_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
+        'total, workers, schedule_id, udp_planned) '
+        'VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)',
         (label, ports_text, udp_text,
          datetime.now().isoformat(timespec='seconds'), 'running', workers,
-         schedule_id))
+         schedule_id, len(active) * len(udp_ports) * 2))
     log_id = cur.lastrowid
     add_event(conn, log_id, 'info',
               f'Старт: {len(active)} адресов, TCP-портов {len(ports)}, '
@@ -2689,6 +2694,19 @@ def api_progress():
     verify_total = job['verify_total'] or 0
     verify_done = job['verify_done'] or 0
     percent_verify = round(verify_done * 100 / verify_total, 1) if verify_total else 0
+    # общий прогресс: все проверки задания, включая будущие этапы.
+    # UDP закладываем с запасом на второй проход, повторную проверку TCP — по
+    # размеру основного прохода.
+    udp_planned = job['udp_planned'] or 0
+    udp_done_all = job['udp_done_all'] or 0
+    verify_weight = total if done < total else verify_total
+    verify_weight = min(verify_weight, total)
+    all_total = total + udp_planned + verify_weight
+    all_done = (done + min(verify_done, verify_weight)
+                + min(udp_done_all, udp_planned))
+    percent_total = round(all_done * 100 / all_total, 1) if all_total else 0
+    if job['status'] == 'completed':
+        percent_total = 100.0
     phase = 'tcp'
     if job['status'] == 'running' and total and done >= total:
         udp_phase = (job['udp_phase'] or '').strip()
@@ -2711,6 +2729,9 @@ def api_progress():
         'verify_total': verify_total,
         'verify_done': verify_done,
         'percent_verify': percent_verify,
+        'percent_total': percent_total,
+        'total_all': all_total,
+        'done_all': all_done,
         'log_id': job['id'],
         'ip_range': job['ip_range'],
         'ports': job['ports'],

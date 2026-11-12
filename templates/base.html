@@ -80,11 +80,14 @@
 <div class="scan-line" id="scanLine"><div class="scan-line__bar" id="progBar"></div></div>
 <div class="scan-chip" id="scanChip">
     <span class="scan-chip__dot" id="scanDot"></span>
-    <span class="scan-chip__range" id="progRange"></span>
-    <span class="scan-chip__meta">
-        <span id="progPct">0%</span> ·
-        <span id="progDone">0</span>/<span id="progTotal">0</span> ·
-        новых <span id="progOpened">0</span>
+    <span class="scan-chip__body">
+        <span class="scan-chip__total">общий прогресс <b id="progTotalPct">0%</b></span>
+        <span class="scan-chip__meta">
+            <span class="scan-chip__range" id="progRange"></span> ·
+            <span id="progPct">0%</span> ·
+            <span id="progDone">0</span>/<span id="progTotal">0</span> ·
+            новых <span id="progOpened">0</span>
+        </span>
     </span>
     {% if current_user.can_manage %}
     <button type="button" class="scan-chip__stop" id="stopBtn">Остановить</button>

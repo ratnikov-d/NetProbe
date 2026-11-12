@@ -724,9 +724,10 @@ th[data-sort]:hover { color: var(--text); }
     background: var(--chip-bg);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
-    border-radius: 999px;
-    padding: .45rem .55rem .45rem .9rem;
+    border-radius: 16px;
+    padding: .5rem .55rem .5rem .9rem;
     font-size: .82rem;
+    max-width: min(560px, calc(100vw - 40px));
     transform: translateY(14px);
     opacity: 0;
     pointer-events: none;
@@ -734,6 +735,26 @@ th[data-sort]:hover { color: var(--text); }
 }
 
 .scan-chip.is-visible { transform: none; opacity: 1; pointer-events: auto; }
+
+.scan-chip__body {
+    display: flex;
+    flex-direction: column;
+    gap: .1rem;
+    line-height: 1.25;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.scan-chip__total {
+    font-size: .72rem;
+    color: var(--muted);
+    letter-spacing: .01em;
+}
+
+.scan-chip__total b {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
 
 .scan-chip__dot {
     width: 8px;

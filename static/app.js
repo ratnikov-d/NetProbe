@@ -86,10 +86,16 @@
         var wasRunning = false;
         var stopping = false;
         var currentJob = null;
+        var overallPct = 0;
 
         function setText(id, value) {
             var el = document.getElementById(id);
             if (el) el.textContent = value;
+        }
+
+        function formatPct(value) {
+            var rounded = Math.round(value * 10) / 10;
+            return (rounded % 1 === 0 ? rounded.toFixed(0) : rounded.toFixed(1)) + '%';
         }
 
         function poll() {
@@ -97,8 +103,16 @@
                 .then(function (r) { return r.json(); })
                 .then(function (p) {
                     if (!p || !p.log_id) return;
-                    currentJob = p.log_id;
+                    if (currentJob !== p.log_id) {
+                        currentJob = p.log_id;
+                        overallPct = 0;
+                    }
                     setText('progRange', p.ip_range);
+                    // общий прогресс не должен уменьшаться, когда проверка
+                    // добавляет второй круг и общий объём растёт
+                    var totalPct = p.percent_total || 0;
+                    if (totalPct > overallPct) overallPct = totalPct;
+                    setText('progTotalPct', formatPct(overallPct));
                     var phase = p.phase;
                     var isUdp = phase === 'udp' || phase === 'udp_verify';
                     var isVerify = phase === 'verify';
@@ -125,7 +139,7 @@
                     }
                     setText('progOpened', p.open_found);
                     var bar = document.getElementById('progBar');
-                    if (bar) bar.style.width = pct + '%';
+                    if (bar) bar.style.width = overallPct + '%';
 
                     var dot = document.getElementById('scanDot');
                     var stop = document.getElementById('stopBtn');
