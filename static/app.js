@@ -99,13 +99,15 @@
                     if (!p || !p.log_id) return;
                     currentJob = p.log_id;
                     setText('progRange', p.ip_range);
-                    var tcpDone = p.phase === 'udp' || (p.total && p.done >= p.total);
-                    setText('progPct', tcpDone ? 'обработка' : p.percent + '%');
-                    setText('progDone', p.done);
-                    setText('progTotal', p.total);
+                    var isUdp = p.phase === 'udp' || (!p.running && (p.udp_total || 0) > 0);
+                    var pct = isUdp ? p.percent_udp || 0 : p.percent || 0;
+                    setText('progPct', isUdp ? 'обработка ' + pct + '%' :
+                            (p.phase === 'finishing' ? 'обработка' : pct + '%'));
+                    setText('progDone', isUdp ? p.udp_done || 0 : p.done);
+                    setText('progTotal', isUdp ? p.udp_total || 0 : p.total);
                     setText('progOpened', p.open_found);
                     var bar = document.getElementById('progBar');
-                    if (bar) bar.style.width = p.percent + '%';
+                    if (bar) bar.style.width = pct + '%';
 
                     var dot = document.getElementById('scanDot');
                     var stop = document.getElementById('stopBtn');

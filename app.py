@@ -244,6 +244,8 @@ def init_db():
     ensure_column(conn, 'scan_logs', 'open_found', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'workers', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'schedule_id', 'INTEGER')
+    ensure_column(conn, 'scan_logs', 'udp_total', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'udp_done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'hosts', 'updated_at', 'TEXT')
     ensure_column(conn, 'users', 'created_at', 'TEXT')
     ensure_column(conn, 'users', 'last_login', 'TEXT')
@@ -901,6 +903,11 @@ def scan_udp(conn, log_id, ips, ports, workers, suppress):
     if not UDP_ENABLED or not ips:
         return 0
     targets = [(ip, port) for ip in ips for port in ports]
+    total = len(targets)
+    processed = 0
+    conn.execute('UPDATE scan_logs SET udp_total = ?, udp_done = 0 WHERE id = ?',
+                 (total, log_id))
+    conn.commit()
     opened = 0
     batch = []
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(targets) or 1))) as pool:
@@ -908,11 +915,21 @@ def scan_udp(conn, log_id, ips, ports, workers, suppress):
         for fut in as_completed(futures):
             batch.append(fut.result())
             if len(batch) >= 100:
-                opened += apply_udp_batch(conn, log_id, batch, suppress)
+                new_ports = apply_udp_batch(conn, log_id, batch, suppress)
+                opened += new_ports
+                processed += len(batch)
                 batch.clear()
+                conn.execute('UPDATE scan_logs SET udp_done = ?, '
+                             'open_found = COALESCE(open_found, 0) + ? WHERE id = ?',
+                             (processed, new_ports, log_id))
                 conn.commit()
     if batch:
-        opened += apply_udp_batch(conn, log_id, batch, suppress)
+        new_ports = apply_udp_batch(conn, log_id, batch, suppress)
+        opened += new_ports
+        processed += len(batch)
+        conn.execute('UPDATE scan_logs SET udp_done = ?, '
+                     'open_found = COALESCE(open_found, 0) + ? WHERE id = ?',
+                     (processed, new_ports, log_id))
         conn.commit()
     return opened
 
@@ -1048,6 +1065,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     conn = db()
     conn.execute('UPDATE scan_logs SET total = ?, done = 0, open_found = 0, '
+                 'udp_total = 0, udp_done = 0, '
                  "status = 'running', workers = ? WHERE id = ?",
                  (total, workers, log_id))
     if suppress:
@@ -1089,6 +1107,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                     done += len(chunk)
             if not stop_event.is_set() and udp_ports:
                 udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers, suppress)
+                opened_total += udp_opened
                 add_event(conn, log_id, 'info',
                           f'UDP-проверка завершена, новых портов: {udp_opened}')
     except Exception as e:  # noqa: BLE001
@@ -2479,13 +2498,19 @@ def api_progress():
     total = job['total'] or 0
     done = job['done'] or 0
     percent = round(done * 100 / total, 1) if total else 0
+    udp_total = job['udp_total'] or 0
+    udp_done = job['udp_done'] or 0
+    percent_udp = round(udp_done * 100 / udp_total, 1) if udp_total else 0
     phase = 'tcp'
     if job['status'] == 'running' and total and done >= total:
-        phase = 'udp'
+        phase = 'udp' if udp_total else 'finishing'
     return jsonify({
         'running': job['status'] == 'running',
         'status': job['status'],
         'phase': phase,
+        'udp_total': udp_total,
+        'udp_done': udp_done,
+        'percent_udp': percent_udp,
         'log_id': job['id'],
         'ip_range': job['ip_range'],
         'ports': job['ports'],
