@@ -1006,16 +1006,10 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
             _stop_flags.pop(log_id, None)
 
 
-def start_scan(ip_range, ports_text, workers_text=None, schedule_id=None,
-               udp_ports_text=None):
-    start_int, end_int = parse_range(ip_range)
-    ports = parse_ports(ports_text)
-    udp_text = (udp_ports_text or '').strip()
-    udp_ports = parse_udp_ports(udp_text) if udp_text else []
-    workers = parse_workers(workers_text)
+def _launch_scan(ips, label, ports_text, ports, udp_text, udp_ports, workers,
+                 schedule_id=None):
+    """Создаёт задание и запускает воркер для готового списка адресов."""
     paused = paused_set()
-
-    ips = [int_to_ip(i) for i in range(start_int, end_int + 1)]
     skipped = [ip for ip in ips if ip in paused]
     active = [ip for ip in ips if ip not in paused]
 
@@ -1023,7 +1017,7 @@ def start_scan(ip_range, ports_text, workers_text=None, schedule_id=None,
     cur = conn.execute(
         'INSERT INTO scan_logs (ip_range, ports, udp_ports, start_time, status, '
         'total, workers, schedule_id) VALUES (?, ?, ?, ?, ?, 0, ?, ?)',
-        (ip_range or DEFAULT_RANGE, ports_text or DEFAULT_PORTS_STR, udp_text,
+        (label, ports_text, udp_text,
          datetime.now().isoformat(timespec='seconds'), 'running', workers,
          schedule_id))
     log_id = cur.lastrowid
@@ -1042,6 +1036,32 @@ def start_scan(ip_range, ports_text, workers_text=None, schedule_id=None,
                      args=(active, ports, udp_ports, log_id, workers),
                      daemon=True).start()
     return log_id
+
+
+def start_scan(ip_range, ports_text, workers_text=None, schedule_id=None,
+               udp_ports_text=None):
+    start_int, end_int = parse_range(ip_range)
+    ports = parse_ports(ports_text)
+    udp_text = (udp_ports_text or '').strip()
+    udp_ports = parse_udp_ports(udp_text) if udp_text else []
+    workers = parse_workers(workers_text)
+
+    ips = [int_to_ip(i) for i in range(start_int, end_int + 1)]
+    return _launch_scan(ips, ip_range or DEFAULT_RANGE,
+                        ports_text or DEFAULT_PORTS_STR, ports, udp_text,
+                        udp_ports, workers, schedule_id)
+
+
+def start_scan_ips(ips, ports_text, udp_ports_text=None, workers_text=None,
+                   label=None):
+    """Сканирование произвольного списка адресов (выбор в таблице)."""
+    ports = parse_ports(ports_text)
+    udp_text = (udp_ports_text or '').strip()
+    udp_ports = parse_udp_ports(udp_text) if udp_text else []
+    workers = parse_workers(workers_text)
+    label = label or f'{len(ips)} адресов (выбор в таблице)'
+    return _launch_scan(ips, label, ports_text or DEFAULT_PORTS_STR, ports,
+                        udp_text, udp_ports, workers)
 
 
 def latest_running_job():
@@ -2145,6 +2165,83 @@ def api_group_delete(group_id):
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/hosts/bulk', methods=['POST'])
+@role_required(*MANAGE_ROLES)
+def api_hosts_bulk():
+    data = request.get_json(silent=True) or {}
+    action = data.get('action')
+    ips = []
+    for raw in (data.get('ips') or []):
+        ip = str(raw).strip()
+        try:
+            ip_to_int(ip)
+        except ValueError:
+            continue
+        if ip not in ips:
+            ips.append(ip)
+    if not ips:
+        return jsonify({'error': 'Не выбрано ни одного адреса'}), 400
+    if len(ips) > 5000:
+        return jsonify({'error': 'Слишком много адресов за один раз (максимум 5000)'}), 400
+
+    now = datetime.now().isoformat(timespec='seconds')
+
+    if action == 'scan':
+        conn = db()
+        last = conn.execute('SELECT ports, udp_ports FROM scan_logs '
+                            'ORDER BY id DESC LIMIT 1').fetchone()
+        conn.close()
+        ports = last['ports'] if last and last['ports'] else DEFAULT_PORTS_STR
+        udp_ports = (last['udp_ports'] if last and last['udp_ports']
+                     else DEFAULT_UDP_PORTS_STR)
+        try:
+            log_id = start_scan_ips(ips, ports, udp_ports_text=udp_ports,
+                                    workers_text=str(SCAN_WORKERS))
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        return jsonify({'status': 'started', 'log_id': log_id,
+                        'count': len(ips)})
+
+    conn = db()
+    if action == 'group':
+        group_id = data.get('group_id')
+        if group_id in ('', None):
+            group_id = None
+        else:
+            try:
+                group_id = int(group_id)
+            except (TypeError, ValueError):
+                conn.close()
+                return jsonify({'error': 'Некорректная группа'}), 400
+            if not conn.execute('SELECT 1 FROM host_groups WHERE id = ?',
+                                (group_id,)).fetchone():
+                conn.close()
+                return jsonify({'error': 'Группа не найдена'}), 400
+        placeholders = ','.join('?' * len(ips))
+        conn.executemany('INSERT OR IGNORE INTO hosts (ip, first_seen, last_seen) '
+                         'VALUES (?, ?, ?)', [(ip, now, now) for ip in ips])
+        conn.execute(f'UPDATE hosts SET group_id = ? WHERE ip IN ({placeholders})',
+                     [group_id] + ips)
+        conn.commit()
+        conn.close()
+        return jsonify({'status': 'ok', 'count': len(ips), 'group_id': group_id})
+
+    if action in ('pause', 'resume'):
+        if action == 'pause':
+            conn.executemany('INSERT OR REPLACE INTO paused_ips '
+                             '(ip, paused_at, reason) VALUES (?, ?, ?)',
+                             [(ip, now, None) for ip in ips])
+        else:
+            placeholders = ','.join('?' * len(ips))
+            conn.execute(f'DELETE FROM paused_ips WHERE ip IN ({placeholders})', ips)
+        conn.commit()
+        conn.close()
+        return jsonify({'status': 'ok', 'count': len(ips)})
+
+    conn.close()
+    return jsonify({'error': 'Неизвестное действие'}), 400
 
 
 # -------------------------------------------------------------------------- API

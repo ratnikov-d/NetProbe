@@ -572,6 +572,52 @@ th[data-sort]:hover { color: var(--text); }
 
 .group-list .empty-groups { padding-left: 1.15rem; }
 
+/* массовые действия в результатах */
+.bulk-bar {
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .45rem;
+    padding: .55rem .75rem;
+    margin-bottom: .75rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    position: sticky;
+    top: .5rem;
+    z-index: 20;
+}
+
+.bulk-bar.is-visible { display: flex; }
+
+.bulk-count { font-size: .84rem; color: var(--muted); }
+.bulk-count strong { color: var(--text); }
+.bulk-group { display: flex; gap: .4rem; flex: 0 1 auto; min-width: 0; }
+.bulk-group .form-select { min-width: 170px; }
+.bulk-bar .btn { white-space: nowrap; flex: 0 0 auto; }
+.cell-check { width: 38px; }
+
+.np-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 4.5rem;
+    transform: translate(-50%, 1rem);
+    padding: .55rem 1rem;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    font-size: .85rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+    z-index: 2500;
+}
+
+.np-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+
 /* вкладки внутри настроек */
 .settings-tabs { gap: .35rem; }
 
