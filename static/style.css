@@ -305,6 +305,17 @@ tr.table-secondary > td {
     background: rgba(139, 152, 173, .07) !important;
 }
 
+/* при наведении строка паузы не должна светлеть */
+.table-hover > tbody > tr.table-secondary:hover > td,
+tr.table-secondary:hover > td {
+    background: rgba(107, 118, 136, .14) !important;
+}
+
+[data-theme="dark"] .table-hover > tbody > tr.table-secondary:hover > td,
+[data-theme="dark"] tr.table-secondary:hover > td {
+    background: rgba(139, 152, 173, .14) !important;
+}
+
 /* плитки статистики по адресу */
 .stat-tiles {
     display: grid;
