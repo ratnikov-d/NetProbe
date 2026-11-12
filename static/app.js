@@ -278,9 +278,7 @@
                     if (service) tip += ' — ' + service;
                     if (closed) tip += ' · закрыт';
                     return '<span class="badge ' + cls + ' me-1" data-port-tip="' +
-                        tip.replace(/"/g, '&quot;') + '">' +
-                        '<span class="np-proto-tag">' + (proto === 'udp' ? 'UDP' : 'TCP') +
-                        '</span>' + p + '</span>';
+                        tip.replace(/"/g, '&quot;') + '">' + p + '</span>';
                 }).join('');
                 html += '<div class="np-history__row">' +
                     '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +

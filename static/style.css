@@ -394,39 +394,29 @@ th[data-sort]:hover { color: var(--text); }
     border-color: rgba(167, 139, 250, .42);
 }
 
-/* закрытый порт в истории: цвет протокола сохраняется, но чип приглушён,
-   зачёркнут и с крестиком — видно и протокол, и что порт закрылся */
+/* закрытый порт в истории: цвет протокола сохраняется, но контур
+   прерывистый и красный — видно, что порт закрылся */
 .np-port-closed {
     background: rgba(148, 163, 184, .10);
-    border-style: dashed;
-    text-decoration: line-through;
+    border-style: dashed !important;
+    border-color: var(--danger) !important;
+    text-decoration: none;
 }
 
 .badge-port.np-port-closed {
     color: #0b7a5c;
-    border-color: rgba(18, 184, 134, .55);
 }
 
 .badge-port-udp.np-port-closed {
     color: #6d28d9;
-    border-color: rgba(139, 92, 246, .55);
 }
 
 [data-theme="dark"] .badge-port.np-port-closed {
     color: #7ee2c0;
-    border-color: rgba(45, 212, 160, .55);
 }
 
 [data-theme="dark"] .badge-port-udp.np-port-closed {
     color: #c4b5fd;
-    border-color: rgba(167, 139, 250, .55);
-}
-
-.np-port-closed::after {
-    content: "✕";
-    margin-left: .3rem;
-    font-size: .68rem;
-    text-decoration: none;
 }
 
 .port-list {
