@@ -56,12 +56,36 @@
                     <input id="groupName" class="form-control" maxlength="40" required
                            placeholder="например: web, почта, АРМ бухгалтерии">
                     <div class="form-text">Так адрес будет подписан в таблице результатов.</div>
+                    <div class="small text-danger mt-2 d-none" id="groupError" role="alert"></div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
                     <button type="submit" class="btn btn-primary">Создать</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="groupDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Удалить группу?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    Группа <span class="group-badge badge" id="delGroupName"></span>
+                </p>
+                <p class="small text-muted mb-0">
+                    Адреса останутся в таблице, но без группы. Отменить это действие нельзя.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="delGroupConfirm">Удалить группу</button>
+            </div>
         </div>
     </div>
 </div>
@@ -81,11 +105,29 @@
     var list = document.getElementById('groupList');
     var editingId = null;
 
+    var errorBox = document.getElementById('groupError');
+    var delModalEl = document.getElementById('groupDeleteModal');
+    var delModal = delModalEl ? new bootstrap.Modal(delModalEl) : null;
+    var delName = document.getElementById('delGroupName');
+    var delConfirm = document.getElementById('delGroupConfirm');
+    var pendingDelete = null;
+
+    function showError(text) {
+        if (!errorBox) return;
+        errorBox.textContent = text || '';
+        errorBox.classList.toggle('d-none', !text);
+    }
+
+    function toast(text) {
+        if (window.npToast) window.npToast(text);
+    }
+
     function openForm(group) {
         editingId = group ? group.id : null;
         title.textContent = group ? 'Переименовать группу' : 'Новая группа';
         submitBtn.textContent = group ? 'Сохранить' : 'Создать';
         input.value = group ? group.name : '';
+        showError('');
         if (modal) modal.show();
     }
 
@@ -126,12 +168,22 @@
 
     function bindDelete(btn) {
         btn.addEventListener('click', function () {
-            var gid = btn.dataset.gid;
-            var name = btn.dataset.name || '';
-            if (!confirm('Удалить группу «' + name + '»? Адреса останутся, но без группы.')) return;
+            pendingDelete = { gid: btn.dataset.gid, name: btn.dataset.name || '' };
+            if (delName) delName.textContent = pendingDelete.name;
+            if (delModal) delModal.show();
+        });
+    }
+
+    if (delConfirm) {
+        delConfirm.addEventListener('click', function () {
+            if (!pendingDelete) return;
+            var gid = pendingDelete.gid;
+            var name = pendingDelete.name;
+            delConfirm.disabled = true;
             fetch(deleteUrl.replace('999999', gid), { method: 'DELETE' })
                 .then(function (r) { return r.json(); })
-                .then(function () {
+                .then(function (res) {
+                    if (res.error) { toast(res.error); return; }
                     var li = list.querySelector('li[data-gid="' + gid + '"]');
                     if (li) li.remove();
                     if (!list.querySelector('li[data-gid]')) {
@@ -140,8 +192,11 @@
                         emptyLi.textContent = 'Групп пока нет.';
                         list.appendChild(emptyLi);
                     }
+                    if (delModal) delModal.hide();
+                    toast('Группа «' + name + '» удалена');
                 })
-                .catch(function () { alert('нет связи с сервером'); });
+                .catch(function () { toast('Нет связи с сервером'); })
+                .then(function () { delConfirm.disabled = false; pendingDelete = null; });
         });
     }
 
@@ -156,7 +211,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name })
         }).then(function (r) { return r.json(); }).then(function (g) {
-            if (g.error) { alert(g.error); input.select(); return; }
+            if (g.error) { showError(g.error); input.select(); return; }
             if (isEdit) {
                 var li = list.querySelector('li[data-gid="' + editingId + '"]');
                 if (li) {
@@ -164,17 +219,19 @@
                     var rb = li.querySelector('.rename-group');
                     if (rb) rb.dataset.name = g.name;
                 }
+                toast('Группа переименована: «' + g.name + '»');
             } else {
                 var existing = list.querySelector('li[data-gid="' + g.id + '"]');
                 if (existing) {
-                    alert('Группа «' + g.name + '» уже есть.');
+                    showError('Группа «' + g.name + '» уже есть.');
                     input.select();
                     return;
                 }
                 makeRow(g, 0);
+                toast('Группа «' + g.name + '» создана');
             }
             if (modal) modal.hide();
-        }).catch(function () { alert('нет связи с сервером'); });
+        }).catch(function () { showError('Нет связи с сервером'); });
     });
 
     document.getElementById('addGroupBtn').addEventListener('click', function () { openForm(null); });

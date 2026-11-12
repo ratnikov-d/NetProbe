@@ -74,6 +74,7 @@
             {% for g in groups %}
             <option value="{{ g.id }}">{{ g.name }}</option>
             {% endfor %}
+            <option value="__new">+ создать группу…</option>
         </select>
         <button class="btn btn-sm btn-outline-primary" type="button" id="bulkGroupApply">Применить</button>
     </div>
@@ -134,10 +135,10 @@
                            value="{{ data.ip }}" aria-label="Выбрать {{ data.ip }}">
                 </td>
                 {% endif %}
-                <td>
+                <td class="cell-ip">
                     <strong>{{ data.ip }}</strong>
                     {% if is_paused %}
-                    <span class="badge bg-warning text-dark ms-1">пауза</span>
+                    <span class="badge bg-warning text-dark ms-1 pause-badge">пауза</span>
                     {% endif %}
                 </td>
                 <td class="cell-group">
@@ -179,7 +180,7 @@
                 </td>
                 <td class="text-muted small text-nowrap">{{ data.last_seen|dt }}</td>
                 <td class="text-muted small text-nowrap">{{ data.updated|dt }}</td>
-                <td class="text-end text-nowrap">
+                <td class="text-end text-nowrap cell-actions">
                     <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
                           class="d-inline" data-keep-scroll>
                         <button class="btn btn-sm btn-outline-primary" type="submit"
@@ -219,8 +220,6 @@
     Клик по заголовку — сортировка. Адреса на паузе не сканируются автоматически.
     Группа и комментарий сохраняются сразу после изменения.
 </p>
-
-<div id="toast" class="np-toast" role="status" aria-live="polite"></div>
 
 {% if current_user.can_manage %}
 <div class="modal fade" id="groupFormModal" tabindex="-1" aria-hidden="true">
@@ -347,6 +346,7 @@
         var checkAll = document.getElementById('checkAll');
 
         function showToast(text) {
+            if (window.npToast) { window.npToast(text); return; }
             var t = document.getElementById('toast');
             if (!t) return;
             t.textContent = text;
@@ -360,6 +360,27 @@
                 function (c) { return c.value; });
         }
 
+        var SEL_KEY = 'np.selected';
+
+        function saveSelection() {
+            try {
+                sessionStorage.setItem(SEL_KEY, selectedIps().join(','));
+            } catch (e) { /* приватный режим */ }
+        }
+
+        function restoreSelection() {
+            var raw = '';
+            try { raw = sessionStorage.getItem(SEL_KEY) || ''; } catch (e) { return; }
+            if (!raw) return;
+            var set = {};
+            raw.split(',').forEach(function (ip) { if (ip) set[ip] = true; });
+            document.querySelectorAll('.row-check').forEach(function (c) {
+                if (set[c.value]) c.checked = true;
+            });
+            refreshBulk();
+            applyFilter();
+        }
+
         function refreshBulk() {
             var n = selectedIps().length;
             if (bulkCount) bulkCount.textContent = n;
@@ -367,7 +388,10 @@
         }
 
         document.querySelectorAll('.row-check').forEach(function (c) {
-            c.addEventListener('change', refreshBulk);
+            c.addEventListener('change', function () {
+                refreshBulk();
+                saveSelection();
+            });
         });
 
         if (checkAll) {
@@ -379,6 +403,7 @@
                     if (c) c.checked = on;
                 });
                 refreshBulk();
+                saveSelection();
             });
         }
 
@@ -399,23 +424,100 @@
             if (!req) return;
             req.then(function (res) {
                 if (res.error) { alert(res.error); return; }
-                try {
-                    sessionStorage.setItem('np.toast', doneText.replace('{n}', res.count));
-                } catch (e) { /* приватный режим */ }
-                location.reload();
+                var n = res.count;
+                if (action === 'group') {
+                    var value = extra && extra.group_id ? String(extra.group_id) : '';
+                    var name = '';
+                    if (value) {
+                        var opt = bulkGroupSel.querySelector('option[value="' + value + '"]');
+                        name = opt ? opt.textContent : '';
+                    }
+                    selectedRows().forEach(function (tr) {
+                        var sel = tr.querySelector('.group-select');
+                        if (sel) { sel.value = value; sel.dataset.prev = value; }
+                        tr.dataset.groupid = value;
+                        tr.dataset.group = name.toLowerCase();
+                    });
+                    applyFilter();
+                } else if (action === 'pause' || action === 'resume') {
+                    selectedRows().forEach(function (tr) { setPaused(tr, action === 'pause'); });
+                } else if (action === 'scan') {
+                    if (window.npStartProgressWatch) window.npStartProgressWatch(res.log_id);
+                }
+                showToast(doneText.replace('{n}', n));
             }).catch(function () { alert('нет связи с сервером'); });
+        }
+
+        function selectedRows() {
+            return Array.prototype.filter.call(rows(), function (tr) {
+                var c = tr.querySelector('.row-check');
+                return c && c.checked;
+            });
+        }
+
+        function setPaused(tr, on) {
+            tr.classList.toggle('table-secondary', on);
+            var ipCell = tr.querySelector('.cell-ip');
+            var badge = ipCell ? ipCell.querySelector('.pause-badge') : null;
+            if (on && !badge && ipCell) {
+                badge = document.createElement('span');
+                badge.className = 'badge bg-warning text-dark ms-1 pause-badge';
+                badge.textContent = 'пауза';
+                ipCell.appendChild(badge);
+            } else if (!on && badge) {
+                badge.remove();
+            }
+
+            var form = tr.querySelector('.cell-actions form[action*="/pause"], ' +
+                                        '.cell-actions form[action*="/resume"]');
+            if (!form) return;
+            var isPause = form.getAttribute('action').indexOf('/pause') !== -1;
+            if (isPause === on) return;
+            var action = form.getAttribute('action');
+            form.setAttribute('action', isPause
+                ? action.replace('/pause', '/resume')
+                : action.replace('/resume', '/pause'));
+            var btn = form.querySelector('button');
+            if (!btn) return;
+            btn.className = on ? 'btn btn-sm btn-outline-success'
+                               : 'btn btn-sm btn-outline-warning';
+            btn.textContent = on ? 'Возобновить' : 'Пауза';
+            btn.title = on ? 'Возобновить сканирование этого адреса'
+                           : 'Не сканировать этот адрес';
         }
 
         var bulkGroupSel = document.getElementById('bulkGroup');
         var bulkGroupBtn = document.getElementById('bulkGroupApply');
 
+        function applyBulkGroup(value, name) {
+            runBulk('group', { group_id: value || null },
+                value ? 'Адреса в группе «' + name + '»: {n}'
+                      : 'Группа снята у адресов: {n}');
+        }
+
         if (bulkGroupBtn) {
             bulkGroupBtn.addEventListener('click', function () {
                 var value = bulkGroupSel.value;
+                if (value === '__new') return;
                 var name = value ? bulkGroupSel.options[bulkGroupSel.selectedIndex].textContent : '';
-                runBulk('group', { group_id: value || null },
-                    value ? 'Адреса в группе «' + name + '»: {n}'
-                          : 'Группа снята у адресов: {n}');
+                applyBulkGroup(value, name);
+            });
+        }
+
+        if (bulkGroupSel) {
+            bulkGroupSel.dataset.prev = bulkGroupSel.value;
+            bulkGroupSel.addEventListener('change', function () {
+                if (bulkGroupSel.value !== '__new') {
+                    bulkGroupSel.dataset.prev = bulkGroupSel.value;
+                    return;
+                }
+                bulkGroupSel.value = bulkGroupSel.dataset.prev || '';
+                pendingBulkGroup = true;
+                if (!selectedIps().length) {
+                    pendingBulkGroup = false;
+                    return;
+                }
+                if (groupModal) groupModal.show();
             });
         }
 
@@ -441,6 +543,7 @@
                 });
                 if (checkAll) checkAll.checked = false;
                 refreshBulk();
+                saveSelection();
             });
         }
 
@@ -452,6 +555,8 @@
             }
         } catch (e) { /* приватный режим */ }
 
+        restoreSelection();
+
         var createGroupUrl = '{{ url_for("api_group_create") }}';
         var groupModalEl = document.getElementById('groupFormModal');
         var groupModal = groupModalEl ? new bootstrap.Modal(groupModalEl) : null;
@@ -459,6 +564,7 @@
         var groupNameInput = document.getElementById('groupName');
         var pendingSelect = null;
         var pendingRow = null;
+        var pendingBulkGroup = false;
 
         if (groupModalEl) {
             groupModalEl.addEventListener('shown.bs.modal', function () {
@@ -474,6 +580,12 @@
             var value = String(group.id);
             if (fGroup && !fGroup.querySelector('option[value="' + value + '"]')) {
                 fGroup.add(new Option(group.name, value));
+            }
+            if (bulkGroupSel && !bulkGroupSel.querySelector('option[value="' + value + '"]')) {
+                var bulkNew = bulkGroupSel.querySelector('option[value="__new"]');
+                var bulkOpt = new Option(group.name, value);
+                if (bulkNew) bulkGroupSel.insertBefore(bulkOpt, bulkNew);
+                else bulkGroupSel.add(bulkOpt);
             }
             document.querySelectorAll('.group-select').forEach(function (sel) {
                 if (sel.querySelector('option[value="' + value + '"]')) return;
@@ -509,10 +621,17 @@
                     addGroupOption(g);
                     var sel = pendingSelect;
                     var tr = pendingRow;
+                    var forBulk = pendingBulkGroup;
                     if (groupModal) groupModal.hide();
-                    if (sel && tr) assignGroup(sel, tr, g);
                     pendingSelect = null;
                     pendingRow = null;
+                    pendingBulkGroup = false;
+                    if (sel && tr) assignGroup(sel, tr, g);
+                    if (forBulk) {
+                        bulkGroupSel.value = String(g.id);
+                        bulkGroupSel.dataset.prev = String(g.id);
+                        applyBulkGroup(String(g.id), g.name);
+                    }
                 }).catch(function () { alert('нет связи с сервером'); });
             });
         }
@@ -525,6 +644,7 @@
                     sel.value = sel.dataset.prev;
                     pendingSelect = sel;
                     pendingRow = tr;
+                    pendingBulkGroup = false;
                     if (groupModal) groupModal.show();
                     return;
                 }

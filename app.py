@@ -718,25 +718,132 @@ def probe(ip, port):
 
 
 UDP_TIMEOUT = float(os.environ.get('UDP_TIMEOUT', '0.6'))
+UDP_DNS_TIMEOUT = float(os.environ.get('UDP_DNS_TIMEOUT', '1.5'))
+UDP_RETRIES = int(os.environ.get('UDP_RETRIES', '2'))
+UDP_RETRY_DELAY = float(os.environ.get('UDP_RETRY_DELAY', '0.2'))
 UDP_ENABLED = os.environ.get('UDP_ENABLED', '1') != '0'
+
+# некоторые UDP-сервисы молча игнорируют мусор: без корректного запроса порт
+# выглядит закрытым. Для популярных протоколов собираем настоящий пакет.
+_PROBE_BUILDERS = {}
+
+
+def _udp_probe(port):
+    builder = _PROBE_BUILDERS.get(port)
+    if builder:
+        return builder()
+    return b'\x00', (lambda data: True)
+
+
+def _dns_probe_payload():
+    txid = struct.unpack('!H', os.urandom(2))[0]
+    packet = struct.pack('!HHHHHH', txid, 0x0100, 1, 0, 0, 0)
+    for label in b'example.com'.split(b'.'):
+        packet += bytes([len(label)]) + label
+    packet += b'\x00\x00\x01\x00\x01'
+
+    def is_response(data):
+        return (len(data) >= 12 and (data[2] & 0x80) == 0x80
+                and struct.unpack('!H', data[:2])[0] == txid)
+
+    return packet, is_response
+
+
+def _mdns_probe_payload():
+    txid = struct.unpack('!H', os.urandom(2))[0]
+    packet = struct.pack('!HHHHHH', txid, 0x0000, 1, 0, 0, 0)
+    for label in b'_services._dns-sd._udp.local'.split(b'.'):
+        packet += bytes([len(label)]) + label
+    packet += b'\x00\x00\x0c\x80\x01'  # PTR, QU: ответить напрямую
+
+    def is_response(data):
+        return len(data) >= 12 and struct.unpack('!H', data[:2])[0] == txid
+
+    return packet, is_response
+
+
+def _ntp_probe_payload():
+    def is_response(data):
+        return len(data) >= 48 and (data[0] & 0x07) == 4  # mode 4: сервер
+
+    return b'\x1b' + b'\x00' * 47, is_response
+
+
+def _snmp_probe_payload():
+    packet = bytes.fromhex(
+        '302602010004067075626c6963a0190204712b5e2c020100020100300b30090605'
+        '2b06010201010500')
+    return packet, (lambda data: len(data) >= 10 and data[0] == 0x30)
+
+
+def _ssdp_probe_payload():
+    packet = (b'M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\n'
+              b'MAN: "ssdp:discover"\r\nMX: 1\r\nST: upnp:rootdevice\r\n\r\n')
+    return packet, (lambda data: data[:5] in (b'HTTP/',))
+
+
+def _netbios_probe_payload():
+    txid = struct.unpack('!H', os.urandom(2))[0]
+    packet = struct.pack('!HHHHHH', txid, 0x0000, 1, 0, 0, 0)
+    packet += b'\x20' + b'CK' + b'A' * 30 + b'\x00'  # имя '*'
+    packet += b'\x00\x21\x00\x01'                     # NBSTAT, IN
+
+    def is_response(data):
+        return len(data) >= 12 and data[:2] == packet[:2]
+
+    return packet, is_response
+
+
+def _tftp_probe_payload():
+    packet = b'\x00\x01' + b'netprobe' + b'\x00' + b'octet' + b'\x00'
+    # RRQ: сервер ответит DATA или ERROR, причём с другого порта
+    return packet, (lambda data: len(data) >= 4 and data[:2] in (b'\x00\x03',
+                                                                b'\x00\x05'))
+
+
+_PROBE_BUILDERS.update({
+    53: _dns_probe_payload,
+    69: _tftp_probe_payload,
+    123: _ntp_probe_payload,
+    137: _netbios_probe_payload,
+    161: _snmp_probe_payload,
+    162: _snmp_probe_payload,
+    1900: _ssdp_probe_payload,
+    5353: _mdns_probe_payload,
+})
+
+# ответ приходит не с того порта, куда отправляли
+UDP_REPLY_FROM_ANY_PORT = {69}
 
 
 def probe_udp(ip, port):
-    """UDP: открытым считаем порт, который ответил на пустой пакет."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(UDP_TIMEOUT)
-    try:
-        sock.connect((ip, port))
-        sock.send(b'\x00')
+    """UDP: открытым считаем порт, который ответил на корректный запрос.
+    Пакет отправляем несколько раз: UDP теряется, а часть сервисов отвечает
+    не с первого раза."""
+    attempts = max(1, UDP_RETRIES)
+    timeout = UDP_DNS_TIMEOUT if port == 53 else UDP_TIMEOUT
+    for attempt in range(attempts):
+        payload, is_response = _udp_probe(port)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
         try:
-            sock.recv(2048)
-            return ip, port, True, None
-        except (socket.timeout, ConnectionRefusedError, OSError):
-            return ip, port, False, None
-    except OSError:
-        return ip, port, False, None
-    finally:
-        sock.close()
+            if port in UDP_REPLY_FROM_ANY_PORT:
+                sock.sendto(payload, (ip, port))
+                data, peer = sock.recvfrom(2048)
+                if peer[0] == ip and is_response(data):
+                    return ip, port, True, None
+            else:
+                sock.connect((ip, port))
+                sock.send(payload)
+                if is_response(sock.recv(2048)):
+                    return ip, port, True, None
+        except OSError:
+            pass
+        finally:
+            sock.close()
+        if attempt < attempts - 1:
+            time.sleep(UDP_RETRY_DELAY)
+    return ip, port, False, None
 
 
 def apply_udp_batch(conn, log_id, batch, suppress=None):

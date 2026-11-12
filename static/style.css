@@ -568,7 +568,7 @@ th[data-sort]:hover { color: var(--text); }
     margin-bottom: .4rem;
     padding: .55rem .7rem;
 }
-.group-list .list-group-item:hover { background: color-mix(in srgb, var(--text) 5%, var(--surface-2)); }
+.group-list .list-group-item:hover { background: rgba(148, 163, 184, .08); }
 
 .group-list .empty-groups { padding-left: 1.15rem; }
 
@@ -600,9 +600,9 @@ th[data-sort]:hover { color: var(--text); }
 
 .np-toast {
     position: fixed;
-    left: 50%;
-    bottom: 4.5rem;
-    transform: translate(-50%, 1rem);
+    right: 1.25rem;
+    bottom: 1.25rem;
+    transform: translateY(1rem);
     padding: .55rem 1rem;
     border-radius: 12px;
     border: 1px solid var(--line);
@@ -616,7 +616,7 @@ th[data-sort]:hover { color: var(--text); }
     z-index: 2500;
 }
 
-.np-toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.np-toast.is-visible { opacity: 1; transform: translateY(0); }
 
 /* вкладки внутри настроек */
 .settings-tabs { gap: .35rem; }

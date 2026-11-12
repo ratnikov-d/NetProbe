@@ -13,6 +13,17 @@
         return s;
     };
 
+    // всплывающее уведомление внизу экрана
+    var toastTimer = null;
+    window.npToast = function (text) {
+        var t = document.getElementById('npToast');
+        if (!t) return;
+        t.textContent = text;
+        t.classList.add('is-visible');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { t.classList.remove('is-visible'); }, 3000);
+    };
+
     var THEME_KEY = 'ps.theme';
     var SCROLL_KEY = 'ps.scroll';
     var root = document.documentElement;
@@ -130,6 +141,14 @@
                 })
                 .catch(function () {});
         }
+
+        // немедленный опрос после запуска сканирования из массовых действий
+        window.npStartProgressWatch = function () {
+            wasRunning = false;
+            stopping = false;
+            if (stopBtn) stopBtn.style.display = '';
+            poll();
+        };
 
         var stopBtn = document.getElementById('stopBtn');
         if (stopBtn) {
