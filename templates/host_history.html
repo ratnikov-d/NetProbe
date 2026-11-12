@@ -58,8 +58,8 @@
                         <div class="port-list">
                             {% for p in e['ports'] %}
                             {% set proto = e['proto'][loop.index0] if e['proto'] and e['proto']|length > loop.index0 else 'tcp' %}
-                            <span class="badge {% if e['action'] != 'opened' %}bg-secondary{% elif proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
-                                  title="{{ 'UDP' if proto == 'udp' else 'TCP' }} {{ p }}">
+                            <span class="badge {% if proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}{% if e['action'] != 'opened' %} np-port-closed{% endif %}"
+                                  title="{{ 'UDP' if proto == 'udp' else 'TCP' }} {{ p }}{% if services.get(p) %} — {{ services[p] }}{% endif %}{% if e['action'] != 'opened' %} · закрыт{% endif %}">
                                 <span class="np-proto-tag">{{ 'UDP' if proto == 'udp' else 'TCP' }}</span>{{ p }}
                             </span>
                             {% endfor %}

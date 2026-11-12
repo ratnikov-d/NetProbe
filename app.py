@@ -2374,7 +2374,7 @@ def settings_test(channel):
     save_settings(values)
 
     try:
-        sender(get_settings(), 'Тестовое уведомление от NetProbeа')
+        sender(get_settings(), 'Тестовое уведомление от NetProbe')
     except Exception as e:  # noqa: BLE001
         flash(f'Не отправлено ({channel}): {e}', 'danger')
     else:
@@ -3003,7 +3003,8 @@ def api_host_history(ip):
         ip_to_int(ip)
     except ValueError:
         return jsonify({'error': 'Некорректный адрес'}), 400
-    return jsonify({'ip': ip, 'events': _host_history_events(ip)})
+    return jsonify({'ip': ip, 'events': _host_history_events(ip),
+                    'services': PORT_SERVICES})
 
 
 @app.route('/hosts/<ip>/history')
@@ -3024,7 +3025,8 @@ def host_history(ip):
                              (host['group_id'],)).fetchone()
     conn.close()
     return render_template('host_history.html', ip=ip, events=events, host=host,
-                           group=group, title='История {0}'.format(ip))
+                           group=group, services=PORT_SERVICES,
+                           title='История {0}'.format(ip))
 
 
 @app.route('/api/alerts')

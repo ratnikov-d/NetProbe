@@ -222,14 +222,23 @@
             tip.style.top = top + 'px';
         }
 
-        items.forEach(function (el) {
-            el.addEventListener('mouseenter', function (e) {
-                tip.textContent = el.dataset.portTip;
-                tip.classList.add('is-visible');
-                place(e.clientX, e.clientY);
-            });
-            el.addEventListener('mousemove', function (e) { place(e.clientX, e.clientY); });
-            el.addEventListener('mouseleave', function () { tip.classList.remove('is-visible'); });
+        // делегирование: работает и для подсказок, добавленных позже
+        document.addEventListener('mouseover', function (e) {
+            var el = e.target.closest && e.target.closest('[data-port-tip]');
+            if (!el) return;
+            tip.textContent = el.dataset.portTip;
+            tip.classList.add('is-visible');
+            place(e.clientX, e.clientY);
+        });
+        document.addEventListener('mousemove', function (e) {
+            if (tip.classList.contains('is-visible')) place(e.clientX, e.clientY);
+        });
+        document.addEventListener('mouseout', function (e) {
+            var el = e.target.closest && e.target.closest('[data-port-tip]');
+            if (!el) return;
+            var to = e.relatedTarget;
+            if (to && el.contains(to)) return;
+            tip.classList.remove('is-visible');
         });
     });
 
@@ -259,13 +268,19 @@
                     ' из ' + all.length + ' событий</div>';
             }
             recent.forEach(function (e) {
+                var closed = e.action !== 'opened';
                 var ports = (e.ports || []).map(function (p, i) {
                     var proto = (e.proto && e.proto[i]) === 'udp' ? 'udp' : 'tcp';
-                    var cls = e.action === 'opened'
-                        ? (proto === 'udp' ? 'badge-port-udp' : 'badge-port')
-                        : 'bg-secondary';
-                    return '<span class="badge ' + cls + ' me-1" data-proto-tip="' +
-                        (proto === 'udp' ? 'UDP' : 'TCP') + ' ' + p + '">' + p + '</span>';
+                    var cls = (proto === 'udp' ? 'badge-port-udp' : 'badge-port');
+                    if (closed) cls += ' np-port-closed';
+                    var tip = (proto === 'udp' ? 'UDP' : 'TCP') + ' ' + p;
+                    var service = (data.services || {})[String(p)];
+                    if (service) tip += ' — ' + service;
+                    if (closed) tip += ' · закрыт';
+                    return '<span class="badge ' + cls + ' me-1" data-port-tip="' +
+                        tip.replace(/"/g, '&quot;') + '">' +
+                        '<span class="np-proto-tag">' + (proto === 'udp' ? 'UDP' : 'TCP') +
+                        '</span>' + p + '</span>';
                 }).join('');
                 html += '<div class="np-history__row">' +
                     '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +

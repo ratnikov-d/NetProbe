@@ -291,29 +291,33 @@ a:hover { color: var(--brand-dark); }
 
 .table-hover > tbody > tr:hover > * { background: var(--bs-table-hover-bg); }
 
-/* адрес на паузе: приглушаем строку цветом темы, а не бутстраповским серым */
+/* адрес на паузе: приглушаем строку цветом темы, а не бутстраповским серым.
+   У Bootstrap подсветка наведения задана через
+   --bs-table-bg-state (!important) и переменные объявлены на <tr>,
+   поэтому переопределяем их на самой строке и задаём фон на ячейках. */
+.table > tbody > tr.table-secondary,
+.table-hover > tbody > tr.table-secondary:hover,
+.table-striped > tbody > tr.table-secondary:nth-of-type(odd),
+.table-striped > tbody > tr.table-secondary:nth-of-type(even) {
+    --bs-table-bg-state: transparent;
+    --bs-table-bg-type: transparent;
+    --bs-table-accent-bg: transparent;
+    --bs-table-color-state: var(--muted);
+    --bs-table-bg: transparent;
+}
+
 tr.table-secondary > td,
 tr.table-secondary > td * {
     color: var(--muted) !important;
 }
 
-tr.table-secondary > td {
+.table > tbody > tr.table-secondary > td {
     background: rgba(107, 118, 136, .08) !important;
+    box-shadow: none;
 }
 
-[data-theme="dark"] tr.table-secondary > td {
+[data-theme="dark"] .table > tbody > tr.table-secondary > td {
     background: rgba(139, 152, 173, .07) !important;
-}
-
-/* при наведении строка паузы не должна светлеть */
-.table-hover > tbody > tr.table-secondary:hover > td,
-tr.table-secondary:hover > td {
-    background: rgba(107, 118, 136, .14) !important;
-}
-
-[data-theme="dark"] .table-hover > tbody > tr.table-secondary:hover > td,
-[data-theme="dark"] tr.table-secondary:hover > td {
-    background: rgba(139, 152, 173, .14) !important;
 }
 
 /* плитки статистики по адресу */
@@ -388,6 +392,41 @@ th[data-sort]:hover { color: var(--text); }
     background: rgba(167, 139, 250, .18);
     color: #c4b5fd;
     border-color: rgba(167, 139, 250, .42);
+}
+
+/* закрытый порт в истории: цвет протокола сохраняется, но чип приглушён,
+   зачёркнут и с крестиком — видно и протокол, и что порт закрылся */
+.np-port-closed {
+    background: rgba(148, 163, 184, .10);
+    border-style: dashed;
+    text-decoration: line-through;
+}
+
+.badge-port.np-port-closed {
+    color: #0b7a5c;
+    border-color: rgba(18, 184, 134, .55);
+}
+
+.badge-port-udp.np-port-closed {
+    color: #6d28d9;
+    border-color: rgba(139, 92, 246, .55);
+}
+
+[data-theme="dark"] .badge-port.np-port-closed {
+    color: #7ee2c0;
+    border-color: rgba(45, 212, 160, .55);
+}
+
+[data-theme="dark"] .badge-port-udp.np-port-closed {
+    color: #c4b5fd;
+    border-color: rgba(167, 139, 250, .55);
+}
+
+.np-port-closed::after {
+    content: "✕";
+    margin-left: .3rem;
+    font-size: .68rem;
+    text-decoration: none;
 }
 
 .port-list {
