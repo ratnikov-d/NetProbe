@@ -31,6 +31,18 @@
     {% endif %}
 </p>
 
+{% if udp53_hosts and current_user.can_manage %}
+<div class="np-note" id="udp53Note">
+    <div>
+        <strong>UDP/53 открыт на {{ udp53_hosts }} адрес{{ 'ах' if udp53_hosts != 1 else 'е' }}.</strong>
+        Обычно это значит, что DNS-запросы перехватывает роутер или провайдер:
+        настоящий DNS не может работать на каждом адресе сети.
+    </div>
+    <button class="btn btn-sm btn-outline-warning flex-shrink-0" type="button"
+            id="udp53Purge">Убрать UDP/53</button>
+</div>
+{% endif %}
+
 <!-- фильтры -->
 <div class="row g-2 align-items-center mb-2">
     <div class="col-md-3">
@@ -172,6 +184,7 @@
                     <div class="port-list">
                         {% for p in data.ports %}
                         <span class="badge {% if p.proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
+                              data-port="{{ p.port }}" data-proto="{{ p.proto }}"
                               data-port-tip="{{ 'UDP' if p.proto == 'udp' else 'TCP' }} {{ p.port }}{% if PORT_SERVICES.get(p.port) %} — {{ PORT_SERVICES[p.port] }}{% endif %}">{{ p.port }}</span>
                         {% else %}
                         <span class="text-muted small">нет открытых портов</span>
@@ -222,6 +235,40 @@
 </p>
 
 {% if current_user.can_manage %}
+<div class="modal fade" id="udp53Modal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Убрать UDP-порт 53?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">
+                    Будут удалены записи об открытом UDP/53 у
+                    <strong>{{ udp53_hosts }}</strong>
+                    адрес{{ 'ов' if udp53_hosts != 1 else 'а' }}.
+                </p>
+                <p class="small text-muted mb-3">
+                    Адреса, группы, комментарии, TCP-порты и другие UDP-порты
+                    останутся на месте. История событий и лог тоже сохранятся.
+                    Сканирование запускать не нужно.
+                </p>
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" id="udp53Schedules">
+                    <label class="form-check-label small" for="udp53Schedules">
+                        Убрать UDP 53 из расписаний, чтобы порт не вернулся
+                        при следующем сканировании
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-warning" id="udp53Confirm">Убрать из таблицы</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="groupFormModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -556,6 +603,67 @@
         } catch (e) { /* приватный режим */ }
 
         restoreSelection();
+
+        // ------------------------------------------------ ложный UDP/53 (перехват DNS)
+        var udp53ModalEl = document.getElementById('udp53Modal');
+        var udp53Modal = udp53ModalEl ? new bootstrap.Modal(udp53ModalEl) : null;
+
+        function stripUdp53FromTable() {
+            rows().forEach(function (tr) {
+                var removed = 0;
+                tr.querySelectorAll('.badge[data-port="53"][data-proto="udp"]')
+                    .forEach(function (chip) { chip.remove(); removed++; });
+                if (!removed) return;
+                var left = tr.querySelectorAll('.port-list .badge').length;
+                tr.dataset.pcount = String(left);
+                tr.dataset.ports = Array.prototype.map.call(
+                    tr.querySelectorAll('.port-list .badge'),
+                    function (b) { return b.dataset.port; }).join(' ');
+                if (!left) {
+                    var list = tr.querySelector('.port-list');
+                    if (list) {
+                        var empty = document.createElement('span');
+                        empty.className = 'text-muted small';
+                        empty.textContent = 'нет открытых портов';
+                        list.appendChild(empty);
+                    }
+                }
+            });
+            applyFilter();
+        }
+
+        if (document.getElementById('udp53Purge')) {
+            document.getElementById('udp53Purge').addEventListener('click', function () {
+                if (udp53Modal) udp53Modal.show();
+            });
+        }
+
+        if (document.getElementById('udp53Confirm')) {
+            document.getElementById('udp53Confirm').addEventListener('click', function () {
+                var btn = this;
+                var schedulesBox = document.getElementById('udp53Schedules');
+                var withSchedules = !!(schedulesBox && schedulesBox.checked);
+                btn.disabled = true;
+                fetch('{{ url_for("api_udp_purge") }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ port: 53, update_schedules: withSchedules })
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    if (res.error) { showToast(res.error); return; }
+                    stripUdp53FromTable();
+                    var note = document.getElementById('udp53Note');
+                    if (note) note.remove();
+                    if (udp53Modal) udp53Modal.hide();
+                    var text = 'Удалено записей UDP/53: ' + res.deleted;
+                    if (res.schedules_updated) {
+                        text += ' · расписаний обновлено: ' + res.schedules_updated;
+                    }
+                    showToast(text);
+                }).catch(function () {
+                    showToast('Нет связи с сервером');
+                }).then(function () { btn.disabled = false; });
+            });
+        }
 
         var createGroupUrl = '{{ url_for("api_group_create") }}';
         var groupModalEl = document.getElementById('groupFormModal');

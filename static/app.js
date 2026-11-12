@@ -99,7 +99,8 @@
                     if (!p || !p.log_id) return;
                     currentJob = p.log_id;
                     setText('progRange', p.ip_range);
-                    setText('progPct', p.percent + '%');
+                    var tcpDone = p.phase === 'udp' || (p.total && p.done >= p.total);
+                    setText('progPct', tcpDone ? 'обработка' : p.percent + '%');
                     setText('progDone', p.done);
                     setText('progTotal', p.total);
                     setText('progOpened', p.open_found);

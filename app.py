@@ -41,7 +41,7 @@ CHUNK_SIZE = int(os.environ.get('CHUNK_SIZE', '2000'))
 SCHED_TICK = int(os.environ.get('SCHED_TICK', '5'))
 
 DEFAULT_PORTS = [21, 22, 23, 25, 53, 80, 110, 143, 443, 445,
-                 3306, 3389, 5432, 8080, 8443]
+                 3306, 3389, 5432, 8080, 8291, 8443]
 DEFAULT_PORTS_STR = ','.join(str(p) for p in DEFAULT_PORTS)
 
 DEFAULT_UDP_PORTS = [53, 67, 68, 69, 123, 137, 138, 161, 162, 500, 514, 520,
@@ -58,8 +58,8 @@ PORT_SERVICES = {
     995: 'POP3S', 1433: 'MSSQL', 1521: 'Oracle', 1900: 'SSDP',
     2049: 'NFS', 3306: 'MySQL', 3389: 'RDP', 4500: 'IPSec NAT-T',
     5432: 'PostgreSQL', 5353: 'mDNS', 5900: 'VNC', 6379: 'Redis',
-    8080: 'HTTP-alt', 8443: 'HTTPS-alt', 9200: 'Elasticsearch',
-    27017: 'MongoDB',
+    8080: 'HTTP-alt', 8291: 'MikroTik Winbox', 8443: 'HTTPS-alt',
+    9200: 'Elasticsearch', 27017: 'MongoDB',
 }
 app.jinja_env.globals['PORT_SERVICES'] = PORT_SERVICES
 DEFAULT_RANGE = '192.168.1.1-254'
@@ -1263,6 +1263,51 @@ def open_ports_count(ip_range):
     return total
 
 
+def purge_removed_ports(ip_range, tcp_removed, udp_removed):
+    """Убирает из результатов порты, которые больше не проверяются.
+    Если порт остался в другом расписании для этих адресов — запись сохраняется."""
+    tcp_removed = {int(p) for p in tcp_removed}
+    udp_removed = {int(p) for p in udp_removed}
+    if not tcp_removed and not udp_removed:
+        return 0
+    try:
+        start_int, end_int = parse_range(ip_range)
+    except ValueError:
+        return 0
+    ips = {int_to_ip(i) for i in range(start_int, end_int + 1)}
+    conn = db()
+    deleted = 0
+    try:
+        keep_tcp = {p: set() for p in tcp_removed}
+        keep_udp = {p: set() for p in udp_removed}
+        for s in conn.execute('SELECT ip_range, ports, udp_ports FROM schedules'):
+            try:
+                s_start, s_end = parse_range(s['ip_range'])
+                s_tcp = set(parse_ports(s['ports'] or DEFAULT_PORTS_STR))
+                s_udp = set(parse_udp_ports(s['udp_ports'] or ''))
+            except ValueError:
+                continue
+            s_ips = {int_to_ip(i) for i in range(s_start, s_end + 1)}
+            for port in tcp_removed & s_tcp:
+                keep_tcp[port] |= s_ips
+            for port in udp_removed & s_udp:
+                keep_udp[port] |= s_ips
+
+        for table, pids, keeps in (('port_state', tcp_removed, keep_tcp),
+                                   ('port_state_udp', udp_removed, keep_udp)):
+            for port in pids:
+                target = ips - keeps.get(port, set())
+                for chunk in chunks(list(target), 500):
+                    placeholders = ','.join('?' * len(chunk))
+                    deleted += conn.execute(
+                        f'DELETE FROM {table} WHERE port = ? AND '
+                        f'ip IN ({placeholders})', [port] + chunk).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return deleted
+
+
 def scheduled_ips():
     """IP-адреса, которые покрыты расписанием."""
     conn = db()
@@ -1464,11 +1509,15 @@ def dashboard():
                           key=lambda kv: kv[1]['updated'] or '', reverse=True))
 
     running = bool(last_scan and last_scan['status'] == 'running')
+    udp53_hosts = sum(1 for d in ordered.values()
+                      if any(p['port'] == 53 and p['proto'] == 'udp'
+                             for p in d['ports']))
     return render_template('dashboard.html', ip_data=ordered, paused=paused,
                            groups=groups, last_scan=last_scan, running=running,
                            total_hosts=len(ordered),
                            with_open=sum(1 for d in ordered.values() if d['ports']),
                            has_schedules=bool(scheduled),
+                           udp53_hosts=udp53_hosts,
                            title='Результаты')
 
 
@@ -1856,8 +1905,22 @@ def schedule_update(sid):
                  (ports, udp_ports, workers, minutes, next_run, sid))
     conn.commit()
     conn.close()
+
+    # порт убрали из расписания — убираем и из результатов, без пересканирования
+    try:
+        old_tcp = set(parse_ports(row['ports'] or DEFAULT_PORTS_STR))
+        old_udp = set(parse_udp_ports(row['udp_ports'] or ''))
+    except ValueError:
+        old_tcp, old_udp = set(), set()
+    removed_tcp = old_tcp - set(parse_ports(ports))
+    removed_udp = old_udp - set(parse_udp_ports(udp_ports))
+    purged = purge_removed_ports(row['ip_range'], removed_tcp, removed_udp)
+
     flash(f'Расписание #{sid} обновлено: порты {ports}, потоков {workers}, '
           f'интервал {minutes} мин', 'success')
+    if removed_tcp or removed_udp:
+        flash('Из результатов убрано записей по снятым портам: '
+              f'{purged}.', 'success')
     return redirect(url_for('schedules'))
 
 
@@ -2274,6 +2337,43 @@ def api_group_delete(group_id):
     return jsonify({'status': 'ok'})
 
 
+@app.route('/api/udp/purge', methods=['POST'])
+@role_required(*MANAGE_ROLES)
+def api_udp_purge():
+    """Удаляет записи об открытом UDP-порте у всех адресов.
+    Нужно, когда провайдер/роутер перехватывает DNS и порт 53 «открыт» везде."""
+    data = request.get_json(silent=True) or {}
+    try:
+        port = int(data.get('port', 53))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Некорректный порт'}), 400
+    if not 1 <= port <= 65535:
+        return jsonify({'error': 'Некорректный порт'}), 400
+
+    conn = db()
+    deleted = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
+                           (port,)).rowcount
+
+    schedules_updated = 0
+    if data.get('update_schedules'):
+        rows = conn.execute('SELECT id, udp_ports FROM schedules '
+                            'WHERE udp_ports IS NOT NULL').fetchall()
+        for row in rows:
+            before = [p.strip() for p in (row['udp_ports'] or '').split(',')
+                      if p.strip()]
+            after = [p for p in before if p != str(port)]
+            if len(after) == len(before):
+                continue
+            conn.execute('UPDATE schedules SET udp_ports = ? WHERE id = ?',
+                         (','.join(after), row['id']))
+            schedules_updated += 1
+
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'deleted': deleted,
+                    'schedules_updated': schedules_updated})
+
+
 @app.route('/api/hosts/bulk', methods=['POST'])
 @role_required(*MANAGE_ROLES)
 def api_hosts_bulk():
@@ -2379,9 +2479,13 @@ def api_progress():
     total = job['total'] or 0
     done = job['done'] or 0
     percent = round(done * 100 / total, 1) if total else 0
+    phase = 'tcp'
+    if job['status'] == 'running' and total and done >= total:
+        phase = 'udp'
     return jsonify({
         'running': job['status'] == 'running',
         'status': job['status'],
+        'phase': phase,
         'log_id': job['id'],
         'ip_range': job['ip_range'],
         'ports': job['ports'],

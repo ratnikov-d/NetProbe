@@ -572,8 +572,26 @@ th[data-sort]:hover { color: var(--text); }
 
 .group-list .empty-groups { padding-left: 1.15rem; }
 
-/* массовые действия в результатах */
-.bulk-bar {
+/* подсказка-предупреждение над таблицей */
+.np-note {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .6rem 1rem;
+    padding: .7rem .9rem;
+    margin-bottom: .85rem;
+    border-radius: 12px;
+    border: 1px solid rgba(245, 158, 11, .45);
+    border-left: 4px solid #f59e0b;
+    background: rgba(245, 158, 11, .08);
+    font-size: .85rem;
+    color: var(--text);
+}
+
+.np-note > div { flex: 1 1 320px; min-width: 0; }
+.np-note strong { display: block; margin-bottom: .15rem; }
+
+/* массовые действия в результатах */.bulk-bar {
     display: none;
     align-items: center;
     flex-wrap: wrap;
@@ -827,5 +845,5 @@ pre.log {
 
 .settings-group__title { font-weight: 700; margin: 0; font-size: 1rem; }
 
-.form-check-label { white-space: nowrap; }
+.form-check-label { white-space: normal; }
 .settings-group .btn { white-space: nowrap; }
