@@ -4,55 +4,132 @@
 
 {% block content %}
 <div class="page-head">
-    <h2>Настройки</h2>
+    <h2>Роли пользователей</h2>
+    <a href="{{ url_for('users') }}" class="btn btn-sm btn-outline-secondary">← К пользователям</a>
 </div>
 
-{% set settings_tab = 'roles' %}
-{% include "_settings_tabs.html" %}
-
-<div class="card shadow-sm">
-    <div class="card-header py-2">Роли пользователей</div>
+<div class="card shadow-sm mb-4">
+    <div class="card-header py-2">Новая роль</div>
     <div class="card-body">
         <p class="text-muted small">
-            Права выбираются переключателями. Изменения действуют сразу после
-            сохранения: пользователи этой роли увидят новый набор возможностей
-            после обновления страницы. Администратор всегда имеет все права.
+            Роль — это набор прав. Создайте роль, отметьте переключатели и назначьте
+            её пользователю на вкладке «Пользователи».
         </p>
+        <form method="POST" action="{{ url_for('role_create') }}" autocomplete="off">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label" for="newRoleTitle">Название роли</label>
+                    <input id="newRoleTitle" name="title" class="form-control" maxlength="40"
+                           placeholder="например: дежурная смена" required>
+                </div>
+                <div class="col-md-7">
+                    <button class="btn btn-primary" type="submit">Создать роль</button>
+                </div>
+            </div>
+            <div class="np-perms mt-3">
+                {% for key, label, hint in PERMISSIONS %}
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="perms" value="{{ key }}"
+                           id="new-role-{{ key }}">
+                    <label class="form-check-label" for="new-role-{{ key }}" title="{{ hint }}">{{ label }}</label>
+                </div>
+                {% endfor %}
+            </div>
+        </form>
+    </div>
+</div>
 
-        {% for role, label in ROLE_LABELS.items() %}
-        {% set rperms = perms.get(role, []) %}
+<div class="card shadow-sm">
+    <div class="card-header py-2">Все роли</div>
+    <div class="card-body">
+        {% for key, info in roles_map.items() %}
+        {% set rperms = perms.get(key, []) %}
         <div class="np-role">
-            <form method="POST" action="{{ url_for('role_update', role=role) }}">
-                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-                    <strong>{{ label }}</strong>
-                    <span class="small-muted">
-                        {% if role == ROLE_ADMIN %}
-                        все права, изменить нельзя
-                        {% else %}
-                        включено {{ rperms|length }} из {{ PERMISSIONS|length }}
+            <form method="POST" action="{{ url_for('role_update', key=key) }}">
+                <div class="row g-2 align-items-end mb-2">
+                    <div class="col-md-5">
+                        <label class="form-label" for="role-title-{{ key }}">Название</label>
+                        <input id="role-title-{{ key }}" name="title" class="form-control form-control-sm"
+                               value="{{ info['title'] }}" maxlength="40"
+                               {% if key == ROLE_ADMIN %}readonly{% endif %}>
+                    </div>
+                    <div class="col-md-7 d-flex flex-wrap gap-2 align-items-center">
+                        {% if info['system'] %}
+                        <span class="badge np-role-badge">встроенная</span>
                         {% endif %}
-                    </span>
+                        <span class="small-muted">
+                            {% if key == ROLE_ADMIN %}
+                            все права — изменить нельзя
+                            {% else %}
+                            включено {{ rperms|length }} из {{ PERMISSIONS|length }}
+                            {% endif %}
+                        </span>
+                        {% if key != ROLE_ADMIN %}
+                        <button class="btn btn-sm btn-primary" type="submit">Сохранить</button>
+                        {% endif %}
+                        {% if not info['system'] %}
+                        <button class="btn btn-sm btn-outline-danger" type="button"
+                                data-role-delete="{{ key }}"
+                                data-role-title="{{ info['title'] }}">Удалить</button>
+                        {% endif %}
+                    </div>
                 </div>
                 <div class="np-perms">
-                    {% for key, plabel, hint in PERMISSIONS %}
+                    {% for pkey, plabel, hint in PERMISSIONS %}
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="perms"
-                               value="{{ key }}" id="role-{{ role }}-{{ key }}"
-                               {% if key in rperms %}checked{% endif %}
-                               {% if role == ROLE_ADMIN %}disabled{% endif %}>
-                        <label class="form-check-label" for="role-{{ role }}-{{ key }}"
+                               value="{{ pkey }}" id="role-{{ key }}-{{ pkey }}"
+                               {% if pkey in rperms %}checked{% endif %}
+                               {% if key == ROLE_ADMIN %}disabled{% endif %}>
+                        <label class="form-check-label" for="role-{{ key }}-{{ pkey }}"
                                title="{{ hint }}">{{ plabel }}</label>
                     </div>
                     {% endfor %}
                 </div>
-                {% if role != ROLE_ADMIN %}
-                <div class="mt-2">
-                    <button class="btn btn-sm btn-primary" type="submit">Сохранить права</button>
-                </div>
-                {% endif %}
             </form>
         </div>
         {% endfor %}
     </div>
 </div>
+
+<div class="modal fade" id="roleDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="POST" id="roleDeleteForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Удалить роль?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Роль <strong id="roleDeleteTitle"></strong> будет удалена.</p>
+                    <p class="small text-muted mb-0">
+                        Пользователи с этой ролью останутся, но получат роль
+                        «{{ role_title.get(ROLE_USER, 'Пользователь') }}» с правами только на просмотр.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-danger">Удалить роль</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var modalEl = document.getElementById('roleDeleteModal');
+    if (!modalEl) return;
+    var modal = new bootstrap.Modal(modalEl);
+    var form = document.getElementById('roleDeleteForm');
+    var titleEl = document.getElementById('roleDeleteTitle');
+    document.querySelectorAll('[data-role-delete]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            form.action = '/settings/roles/' + encodeURIComponent(btn.dataset.roleDelete) + '/delete';
+            titleEl.textContent = btn.dataset.roleTitle;
+            modal.show();
+        });
+    });
+})();
+</script>
 {% endblock %}

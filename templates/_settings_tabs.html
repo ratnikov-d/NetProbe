@@ -5,12 +5,6 @@
            href="{{ url_for('settings_groups') }}">Группы адресов</a>
     </li>
     {% endif %}
-    {% if current_user.is_admin %}
-    <li class="nav-item">
-        <a class="nav-link {% if settings_tab == 'roles' %}active{% endif %}"
-           href="{{ url_for('roles') }}">Роли пользователей</a>
-    </li>
-    {% endif %}
     {% if current_user.can('settings') %}
     <li class="nav-item">
         <a class="nav-link {% if settings_tab == 'notifications' %}active{% endif %}"

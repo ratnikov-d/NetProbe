@@ -947,6 +947,37 @@ pre.log {
     margin: 0 .2rem .2rem 0;
 }
 
+/* переход на страницу ролей */
+.np-link-strong {
+    font-weight: 600;
+    color: var(--brand);
+    text-decoration: none;
+}
+
+.np-link-strong:hover { text-decoration: underline; }
+
+.np-hint-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: .6rem 1rem;
+    margin-top: 1rem;
+    padding: .7rem .9rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--brand);
+    border-radius: 12px;
+    background: var(--chip-bg);
+}
+
+.np-hint-card strong { display: block; margin-bottom: .1rem; }
+
+.np-role-badge {
+    background: rgba(148, 163, 184, .2);
+    color: var(--text);
+    font-weight: 500;
+}
+
 /* длинные списки портов переносятся, а не растягивают таблицу */
 .np-ports { overflow-wrap: anywhere; word-break: break-word; }
 

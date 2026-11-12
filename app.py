@@ -130,22 +130,46 @@ ROLE_DEFAULT_PERMS = {
 }
 
 
-def role_perms():
-    """Права ролей из базы: {role: set(perms)}. Администратор — всегда всё."""
-    result = {role: set(perms) for role, perms in ROLE_DEFAULT_PERMS.items()}
+def role_map():
+    """Роли из базы: {key: {'key','title','perms','system'}}.
+
+    Если таблицы ещё нет (первый старт), возвращает встроенные роли."""
+    result = {}
+    for key, perms in ROLE_DEFAULT_PERMS.items():
+        result[key] = {'key': key, 'title': ROLE_LABELS[key],
+                       'perms': set(perms), 'system': 1}
     conn = db()
     try:
-        for row in conn.execute('SELECT role, perms FROM role_perms'):
-            if row['role'] == ROLE_ADMIN:
-                continue
-            result[row['role']] = {p.strip() for p in (row['perms'] or '').split(',')
-                                   if p.strip() in ALL_PERMS}
+        for row in conn.execute('SELECT key, title, perms, system FROM roles'):
+            result[row['key']] = {
+                'key': row['key'],
+                'title': row['title'] or row['key'],
+                'perms': {p.strip() for p in (row['perms'] or '').split(',')
+                          if p.strip() in ALL_PERMS},
+                'system': row['system'] or 0,
+            }
     except sqlite3.Error:
         pass
     finally:
         conn.close()
-    result[ROLE_ADMIN] = set(ALL_PERMS)
+    # администратор всегда со всеми правами
+    if ROLE_ADMIN in result:
+        result[ROLE_ADMIN]['perms'] = set(ALL_PERMS)
     return result
+
+
+def role_perms():
+    """Права ролей: {key: set(perms)}."""
+    return {key: set(info['perms']) for key, info in role_map().items()}
+
+
+@app.context_processor
+def inject_roles():
+    rmap = role_map()
+    return {
+        'roles_map': rmap,
+        'role_title': {key: info['title'] for key, info in rmap.items()},
+    }
 
 app.jinja_env.globals.update(
     ROLE_LABELS=ROLE_LABELS,
@@ -197,9 +221,12 @@ def init_db():
         )
     ''')
     cur.execute('''
-        CREATE TABLE IF NOT EXISTS role_perms (
-            role TEXT PRIMARY KEY,
-            perms TEXT DEFAULT ''
+        CREATE TABLE IF NOT EXISTS roles (
+            key TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            perms TEXT DEFAULT '',
+            system INTEGER DEFAULT 0,
+            created_at TEXT
         )
     ''')
     cur.execute('''
@@ -324,10 +351,12 @@ def init_db():
                  "WHERE status = 'running'",
                  (datetime.now().isoformat(timespec='seconds'),))
 
-    # права ролей по умолчанию — только при первой инициализации
+    # роли по умолчанию — только при первой инициализации
     for role, perms in ROLE_DEFAULT_PERMS.items():
-        conn.execute('INSERT OR IGNORE INTO role_perms (role, perms) VALUES (?, ?)',
-                     (role, ','.join(sorted(perms))))
+        conn.execute('INSERT OR IGNORE INTO roles (key, title, perms, system, created_at) '
+                     'VALUES (?, ?, ?, 1, ?)',
+                     (role, ROLE_LABELS[role], ','.join(sorted(perms)),
+                      datetime.now().isoformat(timespec='seconds')))
 
     cur.execute('SELECT id, password FROM users WHERE username = ?', ('admin',))
     row = cur.fetchone()
@@ -354,11 +383,13 @@ class User(UserMixin):
         self.id = str(row['id'])
         self.username = row['username']
         self.role = row['role']
-        self.perms = role_perms().get(self.role, set())
+        info = role_map().get(self.role)
+        self.perms = set(info['perms']) if info else set()
+        self._role_title = info['title'] if info else self.role
 
     @property
     def role_label(self):
-        return ROLE_LABELS.get(self.role, self.role)
+        return self._role_title
 
     def can(self, perm):
         return perm in self.perms
@@ -2371,15 +2402,19 @@ def _admin_count():
 @permission_required('users')
 def users():
     form = UserForm()
+    rmap = role_map()
+    # роли, которые можно назначать
+    choices = [(key, info['title']) for key, info in rmap.items()
+               if key != ROLE_ADMIN or current_user.is_admin]
+    form.role.choices = choices
     if request.method == 'GET':
-        form.role.data = ROLE_USER
-    # специалист ИБ не может создавать администраторов
-    if not current_user.is_admin:
-        form.role.choices = [(ROLE_USER, ROLE_LABELS[ROLE_USER]),
-                             (ROLE_SECURITY, ROLE_LABELS[ROLE_SECURITY])]
+        form.role.data = ROLE_USER if ROLE_USER in rmap else (choices[0][0] if choices else '')
 
     if form.validate_on_submit():
         role = form.role.data
+        if role not in rmap:
+            flash('Неизвестная роль', 'danger')
+            return redirect(url_for('users'))
         if role == ROLE_ADMIN and not current_user.is_admin:
             flash('Только администратор может создавать администраторов', 'danger')
             return redirect(url_for('users'))
@@ -2396,17 +2431,16 @@ def users():
                       role, datetime.now().isoformat(timespec='seconds')))
         conn.commit()
         conn.close()
-        flash(f'Пользователь {form.username.data} добавлен '
-              f'({ROLE_LABELS.get(role, role)})', 'success')
+        flash('Пользователь {0} добавлен ({1})'.format(
+            form.username.data, rmap[role]['title']), 'success')
         return redirect(url_for('users'))
 
     conn = db()
     rows = conn.execute(
         'SELECT id, username, role, created_at, last_login FROM users '
         'ORDER BY id').fetchall()
-    perms = role_perms()
     conn.close()
-    return render_template('users.html', form=form, users=rows, role_perms=perms,
+    return render_template('users.html', form=form, users=rows, role_perms=role_perms(),
                            title='Пользователи')
 
 
@@ -2416,28 +2450,93 @@ def users():
 @app.route('/settings/roles', methods=['GET'])
 @role_required(ROLE_ADMIN)
 def roles():
-    perms = role_perms()
-    return render_template('roles.html', perms=perms, title='Роли пользователей')
+    return render_template('roles.html', perms=role_perms(), title='Роли пользователей')
 
 
-@app.route('/settings/roles/<role>/update', methods=['POST'])
+@app.route('/settings/roles/create', methods=['POST'])
 @role_required(ROLE_ADMIN)
-def role_update(role):
-    if role not in ROLE_LABELS:
-        flash('Неизвестная роль', 'danger')
-        return redirect(url_for('roles'))
-    if role == ROLE_ADMIN:
-        flash('Права администратора изменить нельзя: у него есть всё', 'warning')
-        return redirect(url_for('roles'))
+def role_create():
+    title = (request.form.get('title') or '').strip()
     chosen = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
+    if not title:
+        flash('Название роли не может быть пустым', 'danger')
+        return redirect(url_for('roles'))
+    if len(title) > 40:
+        flash('Название роли — не длиннее 40 символов', 'danger')
+        return redirect(url_for('roles'))
     conn = db()
-    conn.execute('INSERT INTO role_perms (role, perms) VALUES (?, ?) '
-                 'ON CONFLICT(role) DO UPDATE SET perms = excluded.perms',
-                 (role, ','.join(chosen)))
+    if conn.execute('SELECT 1 FROM roles WHERE title = ?', (title,)).fetchone():
+        conn.close()
+        flash('Роль с таким названием уже есть', 'danger')
+        return redirect(url_for('roles'))
+    key = 'r' + str(int(time.time() * 1000))[-9:]
+    conn.execute('INSERT INTO roles (key, title, perms, system, created_at) '
+                 'VALUES (?, ?, ?, 0, ?)',
+                 (key, title, ','.join(chosen),
+                  datetime.now().isoformat(timespec='seconds')))
     conn.commit()
     conn.close()
-    flash('Права роли «{0}» сохранены: включено {1} из {2}'.format(
-        ROLE_LABELS[role], len(chosen), len(PERMISSION_KEYS)), 'success')
+    flash('Роль «{0}» создана: прав {1}'.format(title, len(chosen)), 'success')
+    return redirect(url_for('roles'))
+
+
+@app.route('/settings/roles/<key>/update', methods=['POST'])
+@role_required(ROLE_ADMIN)
+def role_update(key):
+    conn = db()
+    row = conn.execute('SELECT * FROM roles WHERE key = ?', (key,)).fetchone()
+    if not row:
+        conn.close()
+        flash('Роль не найдена', 'danger')
+        return redirect(url_for('roles'))
+    if key == ROLE_ADMIN:
+        conn.close()
+        flash('Права администратора изменить нельзя: у него есть всё', 'warning')
+        return redirect(url_for('roles'))
+
+    title = (request.form.get('title') or '').strip() or row['title']
+    chosen = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
+    if len(title) > 40:
+        conn.close()
+        flash('Название роли — не длиннее 40 символов', 'danger')
+        return redirect(url_for('roles'))
+    clash = conn.execute('SELECT 1 FROM roles WHERE title = ? AND key != ?',
+                         (title, key)).fetchone()
+    if clash:
+        conn.close()
+        flash('Роль с таким названием уже есть', 'danger')
+        return redirect(url_for('roles'))
+
+    conn.execute('UPDATE roles SET title = ?, perms = ? WHERE key = ?',
+                 (title, ','.join(chosen), key))
+    conn.commit()
+    conn.close()
+    flash('Роль «{0}» сохранена: прав {1}'.format(title, len(chosen)), 'success')
+    return redirect(url_for('roles'))
+
+
+@app.route('/settings/roles/<key>/delete', methods=['POST'])
+@role_required(ROLE_ADMIN)
+def role_delete(key):
+    conn = db()
+    row = conn.execute('SELECT * FROM roles WHERE key = ?', (key,)).fetchone()
+    if not row:
+        conn.close()
+        flash('Роль не найдена', 'danger')
+        return redirect(url_for('roles'))
+    if row['system']:
+        conn.close()
+        flash('Встроенную роль удалить нельзя', 'danger')
+        return redirect(url_for('roles'))
+    moved = conn.execute('UPDATE users SET role = ? WHERE role = ?',
+                         (ROLE_USER, key)).rowcount
+    conn.execute('DELETE FROM roles WHERE key = ?', (key,))
+    conn.commit()
+    conn.close()
+    text = 'Роль «{0}» удалена'.format(row['title'])
+    if moved:
+        text += ', {0} пользовател(я/ей) переведены на «Пользователь»'.format(moved)
+    flash(text, 'success')
     return redirect(url_for('roles'))
 
 
@@ -2450,7 +2549,8 @@ def user_role(user_id):
         return redirect(url_for('users'))
 
     new_role = request.form.get('role')
-    if new_role not in ROLE_LABELS:
+    rmap = role_map()
+    if new_role not in rmap:
         flash('Неизвестная роль', 'danger')
         return redirect(url_for('users'))
     if row['role'] == ROLE_ADMIN and not current_user.is_admin:
@@ -2467,7 +2567,7 @@ def user_role(user_id):
     conn.execute('UPDATE users SET role = ? WHERE id = ?', (new_role, user_id))
     conn.commit()
     conn.close()
-    flash(f'Роль {row["username"]} изменена на «{ROLE_LABELS[new_role]}»', 'success')
+    flash('Роль {0} изменена на «{1}»'.format(row['username'], rmap[new_role]['title']), 'success')
     return redirect(url_for('users'))
 
 

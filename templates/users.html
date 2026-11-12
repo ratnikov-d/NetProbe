@@ -33,10 +33,18 @@
                 </div>
             </div>
         </form>
-        <p class="text-muted small mb-0 mt-3">
-            Права ролей настраиваются на вкладке
-            <a href="{{ url_for('roles') }}">«Роли пользователей»</a>.
-        </p>
+        <div class="np-hint-card">
+            <div>
+                <strong>Права ролей</strong>
+                <div class="small text-muted">
+                    Настраиваются на вкладке «Роли пользователей»: там же роли можно
+                    создавать, переименовывать и удалять.
+                </div>
+            </div>
+            <a href="{{ url_for('roles') }}" class="btn btn-sm btn-outline-primary flex-shrink-0">
+                Открыть роли
+            </a>
+        </div>
     </div>
 </div>
 
@@ -66,11 +74,11 @@
                 </td>
                 <td>
                     {% if u['role'] == ROLE_ADMIN %}
-                    <span class="badge bg-danger">Администратор</span>
+                    <span class="badge bg-danger">{{ role_title.get(u['role'], u['role']) }}</span>
                     {% elif u['role'] == ROLE_SECURITY %}
-                    <span class="badge bg-primary">Специалист ИБ</span>
+                    <span class="badge bg-primary">{{ role_title.get(u['role'], u['role']) }}</span>
                     {% else %}
-                    <span class="badge bg-secondary">Пользователь</span>
+                    <span class="badge bg-secondary">{{ role_title.get(u['role'], u['role']) }}</span>
                     {% endif %}
                 </td>
                 <td class="small">
@@ -96,9 +104,9 @@
                     <form method="POST" action="{{ url_for('user_role', user_id=u['id']) }}"
                           class="d-inline-flex gap-1 align-items-center">
                         <select name="role" class="form-select form-select-sm" style="width: auto;">
-                            {% for value, label in ROLE_LABELS.items() %}
+                            {% for value, info in roles_map.items() %}
                             {% if value != ROLE_ADMIN or current_user.is_admin %}
-                            <option value="{{ value }}" {% if value == u['role'] %}selected{% endif %}>{{ label }}</option>
+                            <option value="{{ value }}" {% if value == u['role'] %}selected{% endif %}>{{ info['title'] }}</option>
                             {% endif %}
                             {% endfor %}
                         </select>
