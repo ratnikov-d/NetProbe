@@ -142,6 +142,10 @@
                             <form method="POST" action="{{ url_for('schedule_run', sid=s['id']) }}">
                                 <button class="btn btn-sm btn-outline-primary" type="submit">Запустить</button>
                             </form>
+                            <button class="btn btn-sm btn-outline-secondary clear-sched" type="button"
+                                    data-id="{{ s['id'] }}"
+                                    data-range="{{ s['ip_range'] }}"
+                                    title="Убрать результаты и историю по этому диапазону">Очистить историю</button>
                             <form method="POST" action="{{ url_for('schedule_toggle', sid=s['id']) }}">
                                 {% if s['enabled'] %}
                                 <button class="btn btn-sm btn-danger" type="submit">Выключить</button>
@@ -217,6 +221,43 @@
     </div>
 </div>
 
+<div class="modal fade" id="clearHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="clearHistoryForm" method="POST" action="">
+                <div class="modal-header">
+                    <h5 class="modal-title">Очистить историю?</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"
+                            aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        Будут удалены результаты и история по диапазону
+                        <strong id="clearRange"></strong>: открытые порты, события
+                        портов и задания этого расписания.
+                    </p>
+                    <p class="small text-muted mb-3">
+                        Само расписание, настройки портов и интервала останутся.
+                        Адреса, которые проверяются другими расписаниями, не затрагиваются.
+                    </p>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="rescan"
+                               id="clearRescan" checked>
+                        <label class="form-check-label" for="clearRescan">
+                            Запустить новое сканирование сразу после очистки
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary"
+                            data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-warning">Очистить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
 (function () {
     var modalEl = document.getElementById('schedEditModal');
@@ -235,6 +276,19 @@
             document.getElementById('editRange').textContent =
                 row ? row.dataset.range : '';
             modal.show();
+        });
+    });
+
+    var clearEl = document.getElementById('clearHistoryModal');
+    if (!clearEl) return;
+    var clearModal = new bootstrap.Modal(clearEl);
+    var clearForm = document.getElementById('clearHistoryForm');
+    document.querySelectorAll('.clear-sched').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            clearForm.action = '/schedules/' + btn.dataset.id + '/clear-history';
+            document.getElementById('clearRange').textContent = btn.dataset.range;
+            document.getElementById('clearRescan').checked = true;
+            clearModal.show();
         });
     });
 })();

@@ -2111,11 +2111,12 @@ def quick_add_bulk():
 @login_required
 def schedules():
     form = ScheduleForm()
-    if request.method == 'POST' and not current_user.can_manage:
+    if request.method == 'POST' and not current_user.can('schedules'):
         flash('Недостаточно прав для изменения расписания', 'danger')
         return redirect(url_for('schedules'))
     if request.method == 'GET':
-        form.ip_range.data = DEFAULT_RANGE
+        # диапазон оставляем пустым: подсказка-образец в поле, не мешает вводу
+        form.ip_range.data = ''
         form.ports.data = DEFAULT_PORTS_STR
         form.udp_ports.data = DEFAULT_UDP_PORTS_STR
         form.workers.data = str(SCAN_WORKERS)
@@ -2131,7 +2132,7 @@ def schedules():
             workers = parse_workers(form.workers.data)
             now = datetime.now()
             conn = db()
-            conn.execute(
+            cur = conn.execute(
                 'INSERT INTO schedules (ip_range, ports, udp_ports, workers, '
                 'interval_minutes, enabled, next_run, created_at) '
                 'VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
@@ -2139,9 +2140,29 @@ def schedules():
                  interval, (now + timedelta(minutes=interval)
                             ).isoformat(timespec='seconds'),
                  now.isoformat(timespec='seconds')))
+            new_id = cur.lastrowid
             conn.commit()
             conn.close()
             flash(f'Расписание добавлено: каждые {interval} мин', 'success')
+
+            # сразу проверяем новый диапазон, не дожидаясь планового запуска
+            try:
+                log_id = start_scan(form.ip_range.data, tcp_ports,
+                                    str(workers), schedule_id=new_id,
+                                    udp_ports_text=udp_ports)
+            except ValueError as e:
+                flash(f'Сканирование не запущено: {e}', 'warning')
+            else:
+                conn = db()
+                stamp = datetime.now().isoformat(timespec='seconds')
+                conn.execute('UPDATE schedules SET last_run = ?, next_run = ? '
+                             'WHERE id = ?',
+                             (stamp, (datetime.now() + timedelta(minutes=interval)
+                                      ).isoformat(timespec='seconds'), new_id))
+                conn.commit()
+                conn.close()
+                flash(f'Начат первый скан диапазона (задание #{log_id}).',
+                      'success')
             return redirect(url_for('schedules'))
         except ValueError as e:
             flash(f'Ошибка: {e}', 'danger')
@@ -2153,6 +2174,67 @@ def schedules():
                            default_ports=DEFAULT_PORTS_STR,
                            default_udp=DEFAULT_UDP_PORTS_STR,
                            title='Расписание')
+
+
+@app.route('/schedules/<int:sid>/clear-history', methods=['POST'])
+@permission_required('schedules')
+def schedule_clear_history(sid):
+    """Убирает историю по адресам расписания: результаты, события, задания."""
+    conn = db()
+    row = conn.execute('SELECT * FROM schedules WHERE id = ?', (sid,)).fetchone()
+    if not row:
+        conn.close()
+        flash('Расписание не найдено', 'danger')
+        return redirect(url_for('schedules'))
+    try:
+        start_int, end_int = parse_range(row['ip_range'])
+    except ValueError as e:
+        conn.close()
+        flash(f'Ошибка: {e}', 'danger')
+        return redirect(url_for('schedules'))
+
+    ips = [int_to_ip(i) for i in range(start_int, end_int + 1)]
+    scheduled = scheduled_ips()
+    keep = [ip for ip in ips if ip in scheduled]
+    log_ids = [r['id'] for r in conn.execute(
+        'SELECT id FROM scan_logs WHERE schedule_id = ? OR ip_range = ?',
+        (sid, row['ip_range']))]
+    ports = hosts = 0
+    try:
+        for chunk in chunks(keep, 500):
+            placeholders = ','.join('?' * len(chunk))
+            ports += conn.execute(
+                f'DELETE FROM port_state WHERE ip IN ({placeholders})', chunk).rowcount
+            conn.execute(f'DELETE FROM port_state_udp WHERE ip IN ({placeholders})',
+                         chunk)
+            conn.execute(f'DELETE FROM alerts WHERE ip IN ({placeholders})', chunk)
+            hosts += conn.execute(
+                f'DELETE FROM hosts WHERE ip IN ({placeholders})', chunk).rowcount
+        # сначала задания, затем их события (FK/порядок не важен, но так понятнее)
+        conn.execute(
+            'DELETE FROM scan_events WHERE log_id IN '
+            '(SELECT id FROM scan_logs WHERE schedule_id = ? OR ip_range = ?)',
+            (sid, row['ip_range']))
+        conn.execute('DELETE FROM scan_logs WHERE schedule_id = ? OR ip_range = ?',
+                     (sid, row['ip_range']))
+        conn.commit()
+    finally:
+        conn.close()
+
+    flash('История по расписанию #{0} очищена: портов {1}, заданий {2}.'.format(
+        sid, ports, len(log_ids)), 'success')
+
+    if request.form.get('rescan'):
+        try:
+            log_id = start_scan(row['ip_range'], row['ports'],
+                                str(row['workers'] or SCAN_WORKERS),
+                                schedule_id=sid,
+                                udp_ports_text=(row['udp_ports'] or ''))
+        except ValueError as e:
+            flash(f'Сканирование не запущено: {e}', 'warning')
+        else:
+            flash(f'Запущено новое сканирование (задание #{log_id}).', 'success')
+    return redirect(url_for('schedules'))
 
 
 @app.route('/schedules/<int:sid>/toggle', methods=['POST'])
