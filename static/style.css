@@ -932,6 +932,21 @@ pre.log {
 
 .np-usergroup:first-of-type { border-top: 0; }
 
+/* роли пользователей */
+.np-role {
+    padding: .9rem 0;
+    border-top: 1px solid var(--line);
+}
+
+.np-role:first-of-type { border-top: 0; }
+
+.np-perm-badge {
+    background: rgba(59, 130, 246, .16);
+    color: var(--text);
+    font-weight: 500;
+    margin: 0 .2rem .2rem 0;
+}
+
 /* длинные списки портов переносятся, а не растягивают таблицу */
 .np-ports { overflow-wrap: anywhere; word-break: break-word; }
 

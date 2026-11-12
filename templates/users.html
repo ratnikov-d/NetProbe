@@ -10,90 +10,6 @@
 {% set settings_tab = 'users' %}
 {% include "_settings_tabs.html" %}
 
-{% if current_user.is_admin %}
-<div class="card shadow-sm mb-4" id="userGroupsCard">
-    <div class="card-header py-2">Группы пользователей и их права</div>
-    <div class="card-body">
-        <p class="text-muted small">
-            Группа задаёт права переключателями. Пользователь получает права группы,
-            в которой состоит; без группы действуют права роли.
-            Администратор всегда имеет все права.
-        </p>
-
-        <form method="POST" action="{{ url_for('user_group_create') }}" autocomplete="off" class="mb-4">
-            <div class="row g-2 align-items-end">
-                <div class="col-md-3">
-                    <label class="form-label" for="newGroupName">Название группы</label>
-                    <input id="newGroupName" name="name" class="form-control" maxlength="40"
-                           placeholder="например: дежурная смена" required>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label" for="newGroupDescr">Описание (необязательно)</label>
-                    <input id="newGroupDescr" name="description" class="form-control" maxlength="120"
-                           placeholder="кто это и зачем">
-                </div>
-                <div class="col-md-5">
-                    <button class="btn btn-primary" type="submit">Создать группу</button>
-                </div>
-            </div>
-            <div class="np-perms mt-3">
-                {% for key, label, hint in PERMISSIONS %}
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" name="perms" value="{{ key }}"
-                           id="new-{{ key }}">
-                    <label class="form-check-label" for="new-{{ key }}" title="{{ hint }}">{{ label }}</label>
-                </div>
-                {% endfor %}
-            </div>
-        </form>
-
-        {% for g in user_groups %}
-        {% set gperms = (g['perms'] or '').split(',') %}
-        <div class="np-usergroup">
-            <form method="POST" action="{{ url_for('user_group_update', group_id=g['id']) }}"
-                  autocomplete="off">
-                <div class="row g-2 align-items-end">
-                    <div class="col-md-3">
-                        <label class="form-label" for="gname-{{ g['id'] }}">Название</label>
-                        <input id="gname-{{ g['id'] }}" name="name" class="form-control form-control-sm"
-                               value="{{ g['name'] }}" maxlength="40">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label" for="gdesc-{{ g['id'] }}">Описание</label>
-                        <input id="gdesc-{{ g['id'] }}" name="description"
-                               class="form-control form-control-sm"
-                               value="{{ g['description'] or '' }}" maxlength="120">
-                    </div>
-                    <div class="col-md-5 d-flex gap-2">
-                        <button class="btn btn-sm btn-primary" type="submit">Сохранить</button>
-                        <button class="btn btn-sm btn-outline-danger" type="button"
-                                data-group-delete="{{ g['id'] }}"
-                                data-group-name="{{ g['name'] }}">Удалить</button>
-                        <span class="small-muted align-self-center">
-                            пользователей: {{ counts.get(g['id'], 0) }}
-                        </span>
-                    </div>
-                </div>
-                <div class="np-perms mt-2">
-                    {% for key, label, hint in PERMISSIONS %}
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" name="perms" value="{{ key }}"
-                               id="g{{ g['id'] }}-{{ key }}"
-                               {% if key in gperms %}checked{% endif %}>
-                        <label class="form-check-label" for="g{{ g['id'] }}-{{ key }}"
-                               title="{{ hint }}">{{ label }}</label>
-                    </div>
-                    {% endfor %}
-                </div>
-            </form>
-        </div>
-        {% else %}
-        <p class="text-muted small mb-0">Групп пока нет — права выдаются по роли.</p>
-        {% endfor %}
-    </div>
-</div>
-{% endif %}
-
 <div class="card shadow-sm mb-4">
     <div class="card-header py-2">Добавить пользователя</div>
     <div class="card-body">
@@ -118,9 +34,8 @@
             </div>
         </form>
         <p class="text-muted small mb-0 mt-3">
-            Администратор — полный доступ. Специалист ИБ — всё, кроме управления
-            администраторами. Пользователь — просмотр и проверка отдельного IP.
-            Группа пользователя, если назначена, заменяет права роли.
+            Права ролей настраиваются на вкладке
+            <a href="{{ url_for('roles') }}">«Роли пользователей»</a>.
         </p>
     </div>
 </div>
@@ -132,7 +47,7 @@
                 <th>#</th>
                 <th>Логин</th>
                 <th>Роль</th>
-                <th>Группа и права</th>
+                <th>Права роли</th>
                 <th>Создан</th>
                 <th>Последний вход</th>
                 <th class="text-end">Действия</th>
@@ -140,6 +55,7 @@
         </thead>
         <tbody>
             {% for u in users %}
+            {% set uperms = role_perms.get(u['role'], []) %}
             <tr>
                 <td>{{ u['id'] }}</td>
                 <td>
@@ -157,22 +73,18 @@
                     <span class="badge bg-secondary">Пользователь</span>
                     {% endif %}
                 </td>
-                <td>
-                    {% if current_user.is_admin %}
-                    <form method="POST" action="{{ url_for('user_group_assign', user_id=u['id']) }}"
-                          class="d-flex gap-1 align-items-center">
-                        <select name="group_id" class="form-select form-select-sm" style="width: auto;">
-                            <option value="">по роли</option>
-                            {% for g in user_groups %}
-                            <option value="{{ g['id'] }}" {% if u['group_id'] == g['id'] %}selected{% endif %}>
-                                {{ g['name'] }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                        <button class="btn btn-sm btn-outline-secondary" type="submit">OK</button>
-                    </form>
+                <td class="small">
+                    {% if u['role'] == ROLE_ADMIN %}
+                    <span class="text-muted">все права</span>
                     {% else %}
-                    <span class="small-muted">{{ u['group_name'] or 'по роли' }}</span>
+                        {% for key, label, hint in PERMISSIONS %}
+                        {% if key in uperms %}
+                        <span class="badge np-perm-badge" title="{{ hint }}">{{ label }}</span>
+                        {% endif %}
+                        {% endfor %}
+                        {% if not uperms %}
+                        <span class="text-muted">только просмотр</span>
+                        {% endif %}
                     {% endif %}
                 </td>
                 <td class="small text-muted">{{ u['created_at']|dt }}</td>
@@ -219,32 +131,6 @@
 </div>
 
 {% if current_user.is_admin %}
-<div class="modal fade" id="userGroupDeleteModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <form method="POST" id="userGroupDeleteForm">
-                <div class="modal-header">
-                    <h5 class="modal-title">Удалить группу?</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-                </div>
-                <div class="modal-body">
-                    <p class="mb-2">
-                        Группа <strong id="userGroupDeleteName"></strong> будет удалена.
-                    </p>
-                    <p class="small text-muted mb-0">
-                        Пользователи останутся, но их права станут такими, как задаёт роль.
-                        Адреса, расписания и результаты не затрагиваются.
-                    </p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="submit" class="btn btn-danger">Удалить группу</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <div class="modal fade" id="userDeleteModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -268,34 +154,19 @@
 
 <script>
 (function () {
-    var modalEl = document.getElementById('userGroupDeleteModal');
-    if (modalEl) {
-        var modal = new bootstrap.Modal(modalEl);
-        var form = document.getElementById('userGroupDeleteForm');
-        var nameEl = document.getElementById('userGroupDeleteName');
-        document.querySelectorAll('[data-group-delete]').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                form.action = '/settings/user-groups/' + btn.dataset.groupDelete + '/delete';
-                nameEl.textContent = btn.dataset.groupName;
-                modal.show();
-            });
+    var modalEl = document.getElementById('userDeleteModal');
+    if (!modalEl) return;
+    var modal = new bootstrap.Modal(modalEl);
+    var form = document.getElementById('userDeleteForm');
+    var nameEl = document.getElementById('userDeleteName');
+    document.querySelectorAll('form[data-user-delete]').forEach(function (f) {
+        f.addEventListener('submit', function (e) {
+            e.preventDefault();
+            form.action = f.action;
+            nameEl.textContent = f.dataset.userName;
+            modal.show();
         });
-    }
-
-    var userModalEl = document.getElementById('userDeleteModal');
-    if (userModalEl) {
-        var userModal = new bootstrap.Modal(userModalEl);
-        var userForm = document.getElementById('userDeleteForm');
-        var userNameEl = document.getElementById('userDeleteName');
-        document.querySelectorAll('form[data-user-delete]').forEach(function (f) {
-            f.addEventListener('submit', function (e) {
-                e.preventDefault();
-                userForm.action = f.action;
-                userNameEl.textContent = f.dataset.userName;
-                userModal.show();
-            });
-        });
-    }
+    });
 })();
 </script>
 {% endif %}

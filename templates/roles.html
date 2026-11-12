@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Роли пользователей - NetProbe{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h2>Настройки</h2>
+</div>
+
+{% set settings_tab = 'roles' %}
+{% include "_settings_tabs.html" %}
+
+<div class="card shadow-sm">
+    <div class="card-header py-2">Роли пользователей</div>
+    <div class="card-body">
+        <p class="text-muted small">
+            Права выбираются переключателями. Изменения действуют сразу после
+            сохранения: пользователи этой роли увидят новый набор возможностей
+            после обновления страницы. Администратор всегда имеет все права.
+        </p>
+
+        {% for role, label in ROLE_LABELS.items() %}
+        {% set rperms = perms.get(role, []) %}
+        <div class="np-role">
+            <form method="POST" action="{{ url_for('role_update', role=role) }}">
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                    <strong>{{ label }}</strong>
+                    <span class="small-muted">
+                        {% if role == ROLE_ADMIN %}
+                        все права, изменить нельзя
+                        {% else %}
+                        включено {{ rperms|length }} из {{ PERMISSIONS|length }}
+                        {% endif %}
+                    </span>
+                </div>
+                <div class="np-perms">
+                    {% for key, plabel, hint in PERMISSIONS %}
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="perms"
+                               value="{{ key }}" id="role-{{ role }}-{{ key }}"
+                               {% if key in rperms %}checked{% endif %}
+                               {% if role == ROLE_ADMIN %}disabled{% endif %}>
+                        <label class="form-check-label" for="role-{{ role }}-{{ key }}"
+                               title="{{ hint }}">{{ plabel }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if role != ROLE_ADMIN %}
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-primary" type="submit">Сохранить права</button>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

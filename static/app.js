@@ -241,6 +241,8 @@
         var modal = new bootstrap.Modal(modalEl);
         var titleIp = document.getElementById('hostHistoryIp');
         var body = document.getElementById('hostHistoryBody');
+        var fullLink = document.getElementById('hostHistoryFull');
+        var RECENT_LIMIT = 10;
 
         function renderHistory(data) {
             if (!body) return;
@@ -249,8 +251,14 @@
                     'Событий по адресу пока нет: адрес сканировался, но порты не менялись.</div>';
                 return;
             }
+            var all = data.events;
+            var recent = all.slice(-RECENT_LIMIT);
             var html = '';
-            data.events.forEach(function (e) {
+            if (all.length > recent.length) {
+                html += '<div class="small-muted mb-2">Последние ' + recent.length +
+                    ' из ' + all.length + ' событий</div>';
+            }
+            recent.forEach(function (e) {
                 var ports = e.ports.map(function (p) {
                     return '<span class="badge ' +
                         (e.action === 'opened' ? 'badge-port' : 'bg-secondary') +
@@ -272,6 +280,7 @@
 
         function openHistory(ip) {
             if (titleIp) titleIp.textContent = ip;
+            if (fullLink) fullLink.href = '/hosts/' + encodeURIComponent(ip) + '/history';
             if (body) body.innerHTML = '<div class="text-muted small">Загрузка…</div>';
             modal.show();
             fetch('/api/hosts/' + encodeURIComponent(ip) + '/history')

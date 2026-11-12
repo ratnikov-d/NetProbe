@@ -109,25 +109,43 @@ ROLE_LABELS = {
 
 MANAGE_ROLES = (ROLE_ADMIN, ROLE_SECURITY)
 
-# Права, которые администратор включает переключателями в группах пользователей
+# Права, которые администратор включает переключателями для ролей
 PERMISSIONS = [
     ('scan', 'Сканирование', 'Разовое сканирование и проверка выбранных адресов'),
     ('schedules', 'Расписания', 'Создание, изменение, запуск и удаление расписаний'),
-    ('hosts', 'Адреса', 'Группы, комментарии, пауза и массовые действия'),
+    ('hosts', 'Адреса', 'Группы адресов, комментарии, пауза и массовые действия'),
     ('purge', 'Удаление портов', 'Убирать порт из результатов и из расписаний'),
     ('settings', 'Настройки', 'Оповещения и параметры системы'),
-    ('users', 'Пользователи', 'Пользователи, группы и их права'),
+    ('users', 'Пользователи', 'Пользователи и их роли'),
 ]
 PERMISSION_KEYS = [key for key, _label, _hint in PERMISSIONS]
 PERMISSION_LABELS = {key: label for key, label, _hint in PERMISSIONS}
 ALL_PERMS = set(PERMISSION_KEYS)
 
-# что может роль без группы
+# права по умолчанию (используются при первой инициализации)
 ROLE_DEFAULT_PERMS = {
     ROLE_ADMIN: ALL_PERMS,
     ROLE_SECURITY: {'scan', 'schedules', 'hosts', 'purge', 'settings'},
     ROLE_USER: set(),
 }
+
+
+def role_perms():
+    """Права ролей из базы: {role: set(perms)}. Администратор — всегда всё."""
+    result = {role: set(perms) for role, perms in ROLE_DEFAULT_PERMS.items()}
+    conn = db()
+    try:
+        for row in conn.execute('SELECT role, perms FROM role_perms'):
+            if row['role'] == ROLE_ADMIN:
+                continue
+            result[row['role']] = {p.strip() for p in (row['perms'] or '').split(',')
+                                   if p.strip() in ALL_PERMS}
+    except sqlite3.Error:
+        pass
+    finally:
+        conn.close()
+    result[ROLE_ADMIN] = set(ALL_PERMS)
+    return result
 
 app.jinja_env.globals.update(
     ROLE_LABELS=ROLE_LABELS,
@@ -179,12 +197,9 @@ def init_db():
         )
     ''')
     cur.execute('''
-        CREATE TABLE IF NOT EXISTS user_groups (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            description TEXT,
-            perms TEXT DEFAULT '',
-            created_at TEXT
+        CREATE TABLE IF NOT EXISTS role_perms (
+            role TEXT PRIMARY KEY,
+            perms TEXT DEFAULT ''
         )
     ''')
     cur.execute('''
@@ -309,6 +324,11 @@ def init_db():
                  "WHERE status = 'running'",
                  (datetime.now().isoformat(timespec='seconds'),))
 
+    # права ролей по умолчанию — только при первой инициализации
+    for role, perms in ROLE_DEFAULT_PERMS.items():
+        conn.execute('INSERT OR IGNORE INTO role_perms (role, perms) VALUES (?, ?)',
+                     (role, ','.join(sorted(perms))))
+
     cur.execute('SELECT id, password FROM users WHERE username = ?', ('admin',))
     row = cur.fetchone()
     if not row:
@@ -334,18 +354,7 @@ class User(UserMixin):
         self.id = str(row['id'])
         self.username = row['username']
         self.role = row['role']
-        keys = row.keys()
-        self.group_id = row['group_id'] if 'group_id' in keys else None
-        self.group_name = row['group_name'] if 'group_name' in keys else None
-        raw_group_perms = row['group_perms'] if 'group_perms' in keys else None
-        if self.role == ROLE_ADMIN:
-            self.perms = set(ALL_PERMS)
-        elif self.group_id and self.group_name is not None:
-            # группа назначена — права берём из неё, а не из роли
-            self.perms = {p.strip() for p in (raw_group_perms or '').split(',')
-                          if p.strip() in ALL_PERMS}
-        else:
-            self.perms = set(ROLE_DEFAULT_PERMS.get(self.role, set()))
+        self.perms = role_perms().get(self.role, set())
 
     @property
     def role_label(self):
@@ -374,10 +383,7 @@ login_manager.login_message_category = 'warning'
 @login_manager.user_loader
 def load_user(user_id):
     conn = db()
-    row = conn.execute(
-        'SELECT u.*, g.name AS group_name, g.perms AS group_perms '
-        'FROM users u LEFT JOIN user_groups g ON g.id = u.group_id '
-        'WHERE u.id = ?', (user_id,)).fetchone()
+    row = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
     conn.close()
     return User(row) if row else None
 
@@ -2396,144 +2402,43 @@ def users():
 
     conn = db()
     rows = conn.execute(
-        'SELECT u.id, u.username, u.role, u.created_at, u.last_login, u.group_id, '
-        'g.name AS group_name '
-        'FROM users u LEFT JOIN user_groups g ON g.id = u.group_id '
-        'ORDER BY u.id').fetchall()
-    groups = conn.execute('SELECT * FROM user_groups ORDER BY name').fetchall()
-    counts = {r['group_id']: r['c'] for r in conn.execute(
-        'SELECT group_id, COUNT(*) AS c FROM users WHERE group_id IS NOT NULL '
-        'GROUP BY group_id')}
+        'SELECT id, username, role, created_at, last_login FROM users '
+        'ORDER BY id').fetchall()
+    perms = role_perms()
     conn.close()
-    return render_template('users.html', form=form, users=rows, user_groups=groups,
-                           counts=counts, title='Пользователи')
+    return render_template('users.html', form=form, users=rows, role_perms=perms,
+                           title='Пользователи')
 
 
-# --------------------------------------------------- группы пользователей
+# ------------------------------------------------------------ роли и права
 
 
-def _split_perms(raw):
-    return {p.strip() for p in (raw or '').split(',') if p.strip() in ALL_PERMS}
-
-
-@app.route('/settings/user-groups', methods=['POST'])
+@app.route('/settings/roles', methods=['GET'])
 @role_required(ROLE_ADMIN)
-def user_group_create():
-    name = (request.form.get('name') or '').strip()
-    description = (request.form.get('description') or '').strip()
-    perms = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
-    if not name:
-        flash('Название группы не может быть пустым', 'danger')
-        return redirect(url_for('users'))
-    if len(name) > 40:
-        flash('Название группы — не длиннее 40 символов', 'danger')
-        return redirect(url_for('users'))
-    conn = db()
-    exists = conn.execute('SELECT 1 FROM user_groups WHERE name = ?',
-                          (name,)).fetchone()
-    if exists:
-        conn.close()
-        flash('Группа с таким названием уже есть', 'danger')
-        return redirect(url_for('users'))
-    conn.execute('INSERT INTO user_groups (name, description, perms, created_at) '
-                 'VALUES (?, ?, ?, ?)',
-                 (name, description, ','.join(perms),
-                  datetime.now().isoformat(timespec='seconds')))
-    conn.commit()
-    conn.close()
-    flash(f'Группа «{name}» создана, прав: {len(perms)}', 'success')
-    return redirect(url_for('users'))
+def roles():
+    perms = role_perms()
+    return render_template('roles.html', perms=perms, title='Роли пользователей')
 
 
-@app.route('/settings/user-groups/<int:group_id>/update', methods=['POST'])
+@app.route('/settings/roles/<role>/update', methods=['POST'])
 @role_required(ROLE_ADMIN)
-def user_group_update(group_id):
+def role_update(role):
+    if role not in ROLE_LABELS:
+        flash('Неизвестная роль', 'danger')
+        return redirect(url_for('roles'))
+    if role == ROLE_ADMIN:
+        flash('Права администратора изменить нельзя: у него есть всё', 'warning')
+        return redirect(url_for('roles'))
+    chosen = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
     conn = db()
-    row = conn.execute('SELECT * FROM user_groups WHERE id = ?',
-                       (group_id,)).fetchone()
-    if not row:
-        conn.close()
-        flash('Группа не найдена', 'danger')
-        return redirect(url_for('users'))
-
-    name = (request.form.get('name') or '').strip() or row['name']
-    description = (request.form.get('description') or '').strip()
-    perms = [p for p in request.form.getlist('perms') if p in ALL_PERMS]
-    if len(name) > 40:
-        conn.close()
-        flash('Название группы — не длиннее 40 символов', 'danger')
-        return redirect(url_for('users'))
-    clash = conn.execute('SELECT 1 FROM user_groups WHERE name = ? AND id != ?',
-                         (name, group_id)).fetchone()
-    if clash:
-        conn.close()
-        flash('Группа с таким названием уже есть', 'danger')
-        return redirect(url_for('users'))
-
-    conn.execute('UPDATE user_groups SET name = ?, description = ?, perms = ? '
-                 'WHERE id = ?', (name, description, ','.join(perms), group_id))
+    conn.execute('INSERT INTO role_perms (role, perms) VALUES (?, ?) '
+                 'ON CONFLICT(role) DO UPDATE SET perms = excluded.perms',
+                 (role, ','.join(chosen)))
     conn.commit()
     conn.close()
-    flash(f'Группа «{name}» сохранена, прав: {len(perms)}', 'success')
-    return redirect(url_for('users'))
-
-
-@app.route('/settings/user-groups/<int:group_id>/delete', methods=['POST'])
-@role_required(ROLE_ADMIN)
-def user_group_delete(group_id):
-    conn = db()
-    row = conn.execute('SELECT * FROM user_groups WHERE id = ?',
-                       (group_id,)).fetchone()
-    if not row:
-        conn.close()
-        flash('Группа не найдена', 'danger')
-        return redirect(url_for('users'))
-    users_count = conn.execute('SELECT COUNT(*) AS c FROM users WHERE group_id = ?',
-                               (group_id,)).fetchone()['c']
-    conn.execute('UPDATE users SET group_id = NULL WHERE group_id = ?', (group_id,))
-    conn.execute('DELETE FROM user_groups WHERE id = ?', (group_id,))
-    conn.commit()
-    conn.close()
-    flashed = f'Группа «{row["name"]}» удалена'
-    if users_count:
-        flashed += f', у {users_count} пользователей теперь права по роли'
-    flash(flashed, 'success')
-    return redirect(url_for('users'))
-
-
-@app.route('/settings/users/<int:user_id>/group', methods=['POST'])
-@permission_required('users')
-def user_group_assign(user_id):
-    row = _user_or_none(user_id)
-    if not row:
-        flash('Пользователь не найден', 'danger')
-        return redirect(url_for('users'))
-    if row['role'] == ROLE_ADMIN and not current_user.is_admin:
-        flash('Менять группу администратора может только администратор', 'danger')
-        return redirect(url_for('users'))
-    if not current_user.is_admin:
-        flash('Назначать группы может только администратор', 'danger')
-        return redirect(url_for('users'))
-
-    raw = (request.form.get('group_id') or '').strip()
-    group_id = None
-    if raw:
-        try:
-            group_id = int(raw)
-        except ValueError:
-            flash('Некорректная группа', 'danger')
-            return redirect(url_for('users'))
-    conn = db()
-    if group_id is not None and not conn.execute(
-            'SELECT 1 FROM user_groups WHERE id = ?', (group_id,)).fetchone():
-        conn.close()
-        flash('Группа не найдена', 'danger')
-        return redirect(url_for('users'))
-    conn.execute('UPDATE users SET group_id = ? WHERE id = ?', (group_id, user_id))
-    conn.commit()
-    conn.close()
-    flash(f'Группа пользователя {row["username"]} обновлена', 'success')
-    return redirect(url_for('users'))
+    flash('Права роли «{0}» сохранены: включено {1} из {2}'.format(
+        ROLE_LABELS[role], len(chosen), len(PERMISSION_KEYS)), 'success')
+    return redirect(url_for('roles'))
 
 
 @app.route('/settings/users/<int:user_id>/role', methods=['POST'])
@@ -2935,14 +2840,8 @@ def overall_progress(job):
 app.jinja_env.globals['overall_progress'] = overall_progress
 
 
-@app.route('/api/hosts/<ip>/history')
-@login_required
-def api_host_history(ip):
-    """История открытия и закрытия портов по адресу (из таблицы алертов)."""
-    try:
-        ip_to_int(ip)
-    except ValueError:
-        return jsonify({'error': 'Некорректный адрес'}), 400
+def _host_history_events(ip):
+    """Все события портов по адресу, от первого сканирования, по возрастанию."""
     conn = db()
     rows = conn.execute(
         'SELECT port, action, timestamp FROM alerts WHERE ip = ? '
@@ -2975,7 +2874,39 @@ def api_host_history(ip):
             events.append(item)
         if row['port'] not in item['ports']:
             item['ports'].append(row['port'])
-    return jsonify({'ip': ip, 'events': events})
+    return events
+
+
+@app.route('/api/hosts/<ip>/history')
+@login_required
+def api_host_history(ip):
+    """История открытия и закрытия портов по адресу (из таблицы алертов)."""
+    try:
+        ip_to_int(ip)
+    except ValueError:
+        return jsonify({'error': 'Некорректный адрес'}), 400
+    return jsonify({'ip': ip, 'events': _host_history_events(ip)})
+
+
+@app.route('/hosts/<ip>/history')
+@login_required
+def host_history(ip):
+    """Отдельная страница: полная история портов по адресу."""
+    try:
+        ip_to_int(ip)
+    except ValueError:
+        flash('Некорректный адрес', 'danger')
+        return redirect(url_for('dashboard'))
+    events = _host_history_events(ip)
+    conn = db()
+    host = conn.execute('SELECT * FROM hosts WHERE ip = ?', (ip,)).fetchone()
+    group = None
+    if host and host['group_id']:
+        group = conn.execute('SELECT name FROM host_groups WHERE id = ?',
+                             (host['group_id'],)).fetchone()
+    conn.close()
+    return render_template('host_history.html', ip=ip, events=events, host=host,
+                           group=group, title='История {0}'.format(ip))
 
 
 @app.route('/api/alerts')
