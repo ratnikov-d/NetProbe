@@ -1093,7 +1093,11 @@ def _run_udp_phase(conn, log_id, targets, workers, suppress, attempts,
 
 def scan_udp(conn, log_id, ips, ports, workers, suppress, stop_event=None):
     """UDP в два прохода: сканирование, затем проверка тех, кто не ответил."""
-    if not UDP_ENABLED or not ips:
+    if not UDP_ENABLED:
+        add_event(conn, log_id, 'warning',
+                  'UDP-проверки выключены (UDP_ENABLED=0) — UDP-порты не проверялись')
+        return 0
+    if not ips:
         return 0
     targets = [(ip, port) for ip in ips for port in ports]
     conn.execute("UPDATE scan_logs SET udp_phase = 'scan' WHERE id = ?", (log_id,))
@@ -1328,6 +1332,13 @@ def confirm_timeouts(conn, log_id, pairs, workers, suppress=None, stop_event=Non
     return opened
 
 
+def scan_udp_checked(conn, log_id):
+    """Была ли реально выполнена UDP-проверка в этом задании."""
+    row = conn.execute('SELECT COALESCE(udp_done_all, 0) + COALESCE(udp_done, 0) AS c '
+                       'FROM scan_logs WHERE id = ?', (log_id,)).fetchone()
+    return bool(row and row['c'])
+
+
 def known_ips(ips):
     """Адреса, которые уже сканировались ранее (есть в hosts)."""
     conn = db()
@@ -1405,9 +1416,18 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                 opened_total += confirm_timeouts(conn, log_id, uncertain, workers,
                                                  suppress, stop_event)
             if not stop_event.is_set() and udp_ports:
-                udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers, suppress,
-                                      stop_event)
-                opened_total += udp_opened
+                try:
+                    udp_opened = scan_udp(conn, log_id, ips, udp_ports, workers,
+                                          suppress, stop_event)
+                    opened_total += udp_opened
+                except Exception as e:  # noqa: BLE001
+                    # сбой UDP не должен скрывать уже найденные TCP-порты
+                    add_event(conn, log_id, 'error',
+                              f'UDP-проверка прервана: {e}')
+                    conn.commit()
+                if UDP_ENABLED and not scan_udp_checked(conn, log_id):
+                    add_event(conn, log_id, 'warning',
+                              'UDP-проверка не выполнена — смотрите события выше')
     except Exception as e:  # noqa: BLE001
         add_event(conn, log_id, 'error', f'Сканирование прервано: {e}')
         status = 'failed'
