@@ -1718,15 +1718,11 @@ def dashboard():
                           key=lambda kv: kv[1]['updated'] or '', reverse=True))
 
     running = bool(last_scan and last_scan['status'] == 'running')
-    udp53_hosts = sum(1 for d in ordered.values()
-                      if any(p['port'] == 53 and p['proto'] == 'udp'
-                             for p in d['ports']))
     return render_template('dashboard.html', ip_data=ordered, paused=paused,
                            groups=groups, last_scan=last_scan, running=running,
                            total_hosts=len(ordered),
                            with_open=sum(1 for d in ordered.values() if d['ports']),
                            has_schedules=bool(scheduled),
-                           udp53_hosts=udp53_hosts,
                            title='Результаты')
 
 
@@ -2570,40 +2566,51 @@ def api_group_delete(group_id):
     return jsonify({'status': 'ok'})
 
 
-@app.route('/api/udp/purge', methods=['POST'])
+@app.route('/api/ports/purge', methods=['POST'])
 @role_required(*MANAGE_ROLES)
-def api_udp_purge():
-    """Удаляет записи об открытом UDP-порте у всех адресов.
-    Нужно, когда провайдер/роутер перехватывает DNS и порт 53 «открыт» везде."""
+def api_ports_purge():
+    """Убирает порт из результатов (TCP и UDP) у всех адресов.
+
+    Нужно, когда провайдер/роутер перехватывает DNS и порт 53 «открыт» везде:
+    ввести 53, удалить из таблицы и, при желании, исключить из расписаний."""
     data = request.get_json(silent=True) or {}
     try:
-        port = int(data.get('port', 53))
+        port = int(data.get('port'))
     except (TypeError, ValueError):
         return jsonify({'error': 'Некорректный порт'}), 400
     if not 1 <= port <= 65535:
         return jsonify({'error': 'Некорректный порт'}), 400
 
     conn = db()
-    deleted = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
-                           (port,)).rowcount
+    deleted_tcp = conn.execute('DELETE FROM port_state WHERE port = ?',
+                               (port,)).rowcount
+    deleted_udp = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
+                               (port,)).rowcount
+    deleted = max(deleted_tcp, 0) + max(deleted_udp, 0)
 
     schedules_updated = 0
     if data.get('update_schedules'):
-        rows = conn.execute('SELECT id, udp_ports FROM schedules '
-                            'WHERE udp_ports IS NOT NULL').fetchall()
-        for row in rows:
-            before = [p.strip() for p in (row['udp_ports'] or '').split(',')
-                      if p.strip()]
-            after = [p for p in before if p != str(port)]
-            if len(after) == len(before):
+        target = str(port)
+        for row in conn.execute('SELECT id, ports, udp_ports FROM schedules'):
+            tcp_list = [p.strip() for p in (row['ports'] or '').split(',') if p.strip()]
+            udp_list = [p.strip() for p in (row['udp_ports'] or '').split(',')
+                        if p.strip()]
+            tcp_after = [p for p in tcp_list if p != target]
+            udp_after = [p for p in udp_list if p != target]
+            if not tcp_after:
+                # расписание не может остаться совсем без TCP-портов:
+                # пустой список означает «порты по умолчанию»
+                tcp_after = tcp_list
+            if tcp_after == tcp_list and udp_after == udp_list:
                 continue
-            conn.execute('UPDATE schedules SET udp_ports = ? WHERE id = ?',
-                         (','.join(after), row['id']))
+            conn.execute('UPDATE schedules SET ports = ?, udp_ports = ? WHERE id = ?',
+                         (','.join(tcp_after), ','.join(udp_after), row['id']))
             schedules_updated += 1
 
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok', 'deleted': deleted,
+                    'deleted_tcp': deleted_tcp, 'deleted_udp': deleted_udp,
                     'schedules_updated': schedules_updated})
 
 
@@ -2711,6 +2718,35 @@ def overall_progress(job):
 
 
 app.jinja_env.globals['overall_progress'] = overall_progress
+
+
+@app.route('/api/hosts/<ip>/history')
+@login_required
+def api_host_history(ip):
+    """История открытия и закрытия портов по адресу (из таблицы алертов)."""
+    try:
+        ip_to_int(ip)
+    except ValueError:
+        return jsonify({'error': 'Некорректный адрес'}), 400
+    conn = db()
+    rows = conn.execute(
+        'SELECT port, action, timestamp FROM alerts WHERE ip = ? '
+        'ORDER BY timestamp DESC, id DESC LIMIT 500', (ip,)).fetchall()
+    conn.close()
+
+    events = []
+    index = {}
+    for row in rows:
+        key = (row['timestamp'], row['action'])
+        item = index.get(key)
+        if item is None:
+            item = {'timestamp': row['timestamp'], 'action': row['action'],
+                    'ports': []}
+            index[key] = item
+            events.append(item)
+        if row['port'] not in item['ports']:
+            item['ports'].append(row['port'])
+    return jsonify({'ip': ip, 'events': events})
 
 
 @app.route('/api/alerts')

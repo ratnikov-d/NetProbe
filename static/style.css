@@ -839,6 +839,59 @@ pre.log {
 
 .table-responsive { border-radius: var(--radius); }
 
+/* история по адресу */
+.ip-link {
+    border: 0;
+    background: none;
+    padding: 0;
+    font-weight: 700;
+    color: var(--brand);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.ip-link:hover { text-decoration: underline; }
+
+.np-history { max-height: 60vh; overflow-y: auto; font-size: .85rem; }
+
+.np-history__row {
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+    padding: .4rem 0;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+}
+
+.np-history__row:last-child { border-bottom: 0; }
+
+.np-history__time {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+    font-size: .8rem;
+}
+
+.np-history__what { min-width: 10.5rem; }
+.np-history__ports { flex: 1 1 auto; }
+
+.last-scan { margin-bottom: .2rem; }
+
+/* панель удаления порта из результатов */
+.np-purge {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .5rem .7rem;
+    margin-bottom: .85rem;
+    padding: .55rem .8rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--chip-bg);
+}
+
+.np-purge__input { width: 90px; flex: 0 0 auto; }
+
 /* длинные списки портов переносятся, а не растягивают таблицу */
 .np-ports { overflow-wrap: anywhere; word-break: break-word; }
 

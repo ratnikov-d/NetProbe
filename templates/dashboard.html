@@ -20,40 +20,28 @@
         Лог последнего сканирования <span class="small-muted" id="logJob"></span>
         <a href="{{ url_for('logs') }}" class="ms-auto small">вся история</a>
     </summary>
+    <div class="last-scan small px-3 pt-2">
+        {% if last_scan %}
+        <div class="text-muted">
+            Последний запуск: <code>{{ last_scan['ip_range'] }}</code>
+            &middot; {{ last_scan['start_time']|dt }}
+            {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time']|dt }}{% endif %}
+        </div>
+        <div class="np-ports-cell mt-1">
+            <span class="badge badge-port me-1">TCP</span>
+            <span class="np-ports text-muted">{{ last_scan['ports'] or '—' }}</span>
+        </div>
+        {% if last_scan['udp_ports'] %}
+        <div class="np-ports-cell mt-1">
+            <span class="badge badge-port-udp me-1">UDP</span>
+            <span class="np-ports text-muted">{{ last_scan['udp_ports'] }}</span>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
     <pre class="log" id="liveLog" style="max-height: 190px; overflow-y: auto;">загрузка…</pre>
 </details>
 
-<div class="last-scan small">
-    {% if last_scan %}
-    <div class="text-muted">
-        Последний запуск: <code>{{ last_scan['ip_range'] }}</code>
-        &middot; {{ last_scan['start_time']|dt }}
-        {% if last_scan['end_time'] %}— {{ last_scan['status']|status_ru }} {{ last_scan['end_time']|dt }}{% endif %}
-    </div>
-    <div class="np-ports-cell mt-1">
-        <span class="badge badge-port me-1">TCP</span>
-        <span class="np-ports text-muted">{{ last_scan['ports'] or '—' }}</span>
-    </div>
-    {% if last_scan['udp_ports'] %}
-    <div class="np-ports-cell mt-1">
-        <span class="badge badge-port-udp me-1">UDP</span>
-        <span class="np-ports text-muted">{{ last_scan['udp_ports'] }}</span>
-    </div>
-    {% endif %}
-    {% endif %}
-</div>
-
-{% if udp53_hosts and current_user.can_manage %}
-<div class="np-note" id="udp53Note">
-    <div>
-        <strong>UDP/53 открыт на {{ udp53_hosts }} адрес{{ 'ах' if udp53_hosts != 1 else 'е' }}.</strong>
-        Обычно это значит, что DNS-запросы перехватывает роутер или провайдер:
-        настоящий DNS не может работать на каждом адресе сети.
-    </div>
-    <button class="btn btn-sm btn-outline-warning flex-shrink-0" type="button"
-            id="udp53Purge">Убрать UDP/53</button>
-</div>
-{% endif %}
 
 <!-- фильтры -->
 <div class="row g-2 align-items-center mb-2">
@@ -61,7 +49,8 @@
         <input id="fIp" class="form-control form-control-sm" placeholder="Фильтр по IP (например 192.168.1.)">
     </div>
     <div class="col-md-2">
-        <input id="fPort" class="form-control form-control-sm" placeholder="Порт (443)">
+        <input id="fPort" class="form-control form-control-sm"
+               placeholder="Порт (80 найдёт 8080)">
     </div>
     <div class="col-md-2">
         <select id="fGroup" class="form-select form-select-sm">
@@ -88,6 +77,21 @@
     Всего адресов: {{ total_hosts }} · с открытыми портами: {{ with_open }}
     <span class="ms-2" id="rowCount"></span>
 </p>
+
+{% if current_user.can_manage %}
+<form class="np-purge" id="portPurgeForm" autocomplete="off">
+    <label class="small text-muted mb-0" for="purgePort">Удалить порт из таблицы:</label>
+    <input id="purgePort" class="form-control form-control-sm np-purge__input"
+           inputmode="numeric" maxlength="5" placeholder="53">
+    <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
+    <div class="form-check form-check-inline mb-0 ms-1">
+        <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
+        <label class="form-check-label small" for="purgeFromSchedules">
+            исключить его из всех расписаний
+        </label>
+    </div>
+</form>
+{% endif %}
 
 {% if current_user.can_manage %}
 <div class="bulk-bar" id="bulkBar">
@@ -160,7 +164,8 @@
                 </td>
                 {% endif %}
                 <td class="cell-ip">
-                    <strong>{{ data.ip }}</strong>
+                    <button type="button" class="ip-link" data-ip="{{ data.ip }}"
+                            title="История по адресу">{{ data.ip }}</button>
                     {% if is_paused %}
                     <span class="badge bg-warning text-dark ms-1 pause-badge">пауза</span>
                     {% endif %}
@@ -247,35 +252,18 @@
 </p>
 
 {% if current_user.can_manage %}
-<div class="modal fade" id="udp53Modal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+<div class="modal fade" id="hostHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Убрать UDP-порт 53?</h5>
+                <h5 class="modal-title">История адреса <code id="hostHistoryIp"></code></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
             </div>
             <div class="modal-body">
-                <p class="mb-2">
-                    Будут удалены записи об открытом UDP/53 у
-                    <strong>{{ udp53_hosts }}</strong>
-                    адрес{{ 'ов' if udp53_hosts != 1 else 'а' }}.
-                </p>
-                <p class="small text-muted mb-3">
-                    Адреса, группы, комментарии, TCP-порты и другие UDP-порты
-                    останутся на месте. История событий и лог тоже сохранятся.
-                    Сканирование запускать не нужно.
-                </p>
-                <div class="form-check mt-3">
-                    <input class="form-check-input" type="checkbox" id="udp53Schedules">
-                    <label class="form-check-label small" for="udp53Schedules">
-                        Убрать UDP 53 из расписаний, чтобы порт не вернулся
-                        при следующем сканировании
-                    </label>
-                </div>
+                <div id="hostHistoryBody" class="np-history">Загрузка…</div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                <button type="button" class="btn btn-warning" id="udp53Confirm">Убрать из таблицы</button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>
     </div>
@@ -350,9 +338,29 @@
         return Array.prototype.slice.call(tbody.querySelectorAll('tr[data-ip]'));
     }
 
+    /* Поиск по порту:
+       «80» — ищем вхождение (найдёт 80, 8080, 1080);
+       «80,», «80;», «80 », «"80"» — точное совпадение.
+       Разделитель после порта или кавычки включают точный режим. */
+    function parsePortQuery(raw) {
+        var tokens = [];
+        var re = /("[^"]*"|'[^']*'|[^,;\s]+)([,;\s]*)/g;
+        var m;
+        while ((m = re.exec(raw)) !== null) {
+            var token = m[1];
+            var tail = m[2] || '';
+            var quoted = token.charAt(0) === '"' || token.charAt(0) === "'";
+            if (quoted) token = token.slice(1, -1);
+            token = token.trim();
+            if (!token) continue;
+            tokens.push({ text: token, exact: quoted || tail.length > 0 });
+        }
+        return tokens;
+    }
+
     function applyFilter() {
         var ipPart = fIp.value.trim();
-        var portPart = fPort.value.trim();
+        var portQuery = parsePortQuery(fPort.value);
         var groupPart = fGroup ? fGroup.value : '';
         var textPart = fText ? fText.value.trim().toLowerCase() : '';
         var onlyOpen = fOnlyOpen.checked;
@@ -360,9 +368,13 @@
         rows().forEach(function (tr) {
             var ok = true;
             if (ipPart && tr.dataset.ip.indexOf(ipPart) === -1) ok = false;
-            if (ok && portPart) {
+            if (ok && portQuery.length) {
                 var ports = (tr.dataset.ports || '').split(' ').filter(Boolean);
-                ok = ports.indexOf(portPart) !== -1;
+                ok = portQuery.some(function (q) {
+                    return ports.some(function (p) {
+                        return q.exact ? p === q.text : p.indexOf(q.text) !== -1;
+                    });
+                });
             }
             if (ok && groupPart === '__none') ok = !tr.dataset.groupid;
             else if (ok && groupPart && tr.dataset.groupid !== groupPart) ok = false;
@@ -616,15 +628,73 @@
 
         restoreSelection();
 
-        // ------------------------------------------------ ложный UDP/53 (перехват DNS)
-        var udp53ModalEl = document.getElementById('udp53Modal');
-        var udp53Modal = udp53ModalEl ? new bootstrap.Modal(udp53ModalEl) : null;
+        // ------------------------------------------------ история по адресу
+        var historyModalEl = document.getElementById('hostHistoryModal');
+        var historyModal = historyModalEl ? new bootstrap.Modal(historyModalEl) : null;
+        var historyIp = document.getElementById('hostHistoryIp');
+        var historyBody = document.getElementById('hostHistoryBody');
 
-        function stripUdp53FromTable() {
+        function renderHistory(ip, data) {
+            if (!historyBody) return;
+            if (!data.events || !data.events.length) {
+                historyBody.innerHTML = '<div class="text-muted small">' +
+                    'Событий по адресу пока нет: адрес сканировался, но порты не менялись.</div>';
+                return;
+            }
+            var html = '';
+            data.events.forEach(function (e) {
+                var cls = e.action === 'opened' ? 'np-history__port' : 'np-history__port np-history__port--closed';
+                var ports = e.ports.map(function (p) {
+                    return '<span class="badge ' + (e.action === 'opened' ? 'badge-port' : 'bg-secondary') +
+                        ' me-1">' + p + '</span>';
+                }).join('');
+                html += '<div class="np-history__row">' +
+                    '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +
+                    '<span class="np-history__what">' +
+                        (e.action === 'opened' ? 'найден порт' + (e.ports.length > 1 ? 'ы' : '') :
+                                                 'порт' + (e.ports.length > 1 ? 'ы' : '') + ' закрыт' + (e.ports.length > 1 ? 'ы' : '')) +
+                    '</span>' +
+                    '<span class="np-history__ports">' + ports + '</span>' +
+                '</div>';
+            });
+            historyBody.innerHTML = html;
+        }
+
+        function openHistory(ip) {
+            if (!historyModal) return;
+            if (historyIp) historyIp.textContent = ip;
+            if (historyBody) historyBody.innerHTML = '<div class="text-muted small">Загрузка…</div>';
+            historyModal.show();
+            fetch('/api/hosts/' + encodeURIComponent(ip) + '/history')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.error) {
+                        if (historyBody) historyBody.innerHTML =
+                            '<div class="text-danger small">' + data.error + '</div>';
+                        return;
+                    }
+                    renderHistory(ip, data);
+                })
+                .catch(function () {
+                    if (historyBody) historyBody.innerHTML =
+                        '<div class="text-danger small">Нет связи с сервером</div>';
+                });
+        }
+
+        document.querySelectorAll('.ip-link').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                openHistory(btn.dataset.ip);
+            });
+        });
+
+        // ------------------------------------------------ удалить порт из таблицы
+        function stripPortFromTable(port) {
+            var target = String(port);
             rows().forEach(function (tr) {
                 var removed = 0;
-                tr.querySelectorAll('.badge[data-port="53"][data-proto="udp"]')
-                    .forEach(function (chip) { chip.remove(); removed++; });
+                tr.querySelectorAll('.port-list .badge[data-port]').forEach(function (chip) {
+                    if (chip.dataset.port === target) { chip.remove(); removed++; }
+                });
                 if (!removed) return;
                 var left = tr.querySelectorAll('.port-list .badge').length;
                 tr.dataset.pcount = String(left);
@@ -633,7 +703,7 @@
                     function (b) { return b.dataset.port; }).join(' ');
                 if (!left) {
                     var list = tr.querySelector('.port-list');
-                    if (list) {
+                    if (list && !list.querySelector('.text-muted')) {
                         var empty = document.createElement('span');
                         empty.className = 'text-muted small';
                         empty.textContent = 'нет открытых портов';
@@ -644,36 +714,38 @@
             applyFilter();
         }
 
-        if (document.getElementById('udp53Purge')) {
-            document.getElementById('udp53Purge').addEventListener('click', function () {
-                if (udp53Modal) udp53Modal.show();
-            });
-        }
-
-        if (document.getElementById('udp53Confirm')) {
-            document.getElementById('udp53Confirm').addEventListener('click', function () {
-                var btn = this;
-                var schedulesBox = document.getElementById('udp53Schedules');
-                var withSchedules = !!(schedulesBox && schedulesBox.checked);
-                btn.disabled = true;
-                fetch('{{ url_for("api_udp_purge") }}', {
+        var purgeForm = document.getElementById('portPurgeForm');
+        if (purgeForm) {
+            purgeForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var input = document.getElementById('purgePort');
+                var port = parseInt((input.value || '').trim(), 10);
+                if (!port || port < 1 || port > 65535) {
+                    showToast('Введите номер порта от 1 до 65535');
+                    return;
+                }
+                var box = document.getElementById('purgeFromSchedules');
+                var withSchedules = !!(box && box.checked);
+                var submit = purgeForm.querySelector('button[type="submit"]');
+                if (submit) submit.disabled = true;
+                fetch('{{ url_for("api_ports_purge") }}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ port: 53, update_schedules: withSchedules })
+                    body: JSON.stringify({ port: port, update_schedules: withSchedules })
                 }).then(function (r) { return r.json(); }).then(function (res) {
                     if (res.error) { showToast(res.error); return; }
-                    stripUdp53FromTable();
-                    var note = document.getElementById('udp53Note');
-                    if (note) note.remove();
-                    if (udp53Modal) udp53Modal.hide();
-                    var text = 'Удалено записей UDP/53: ' + res.deleted;
+                    stripPortFromTable(port);
+                    var text = 'Порт ' + port + ' убран из таблицы, записей: ' + res.deleted;
                     if (res.schedules_updated) {
                         text += ' · расписаний обновлено: ' + res.schedules_updated;
                     }
                     showToast(text);
+                    input.value = '';
                 }).catch(function () {
                     showToast('Нет связи с сервером');
-                }).then(function () { btn.disabled = false; });
+                }).then(function () {
+                    if (submit) submit.disabled = false;
+                });
             });
         }
 
