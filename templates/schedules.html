@@ -118,6 +118,10 @@
                             <span class="badge badge-port-udp me-1">UDP</span>
                             {% for p in s['udp_ports'].split(',') %}<span class="port-token">{{ p.strip() }}</span>{% if not loop.last %}<span class="port-sep">,</span>{% endif %}{% endfor %}
                         </div>
+                        {% else %}
+                        <div class="mt-1 small-muted">
+                            <span class="badge bg-secondary me-1">UDP</span>не проверяется
+                        </div>
                         {% endif %}
                     </td>
                     <td class="nowrap">{{ s['interval_minutes'] }} мин</td>
