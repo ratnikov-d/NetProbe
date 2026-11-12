@@ -262,7 +262,8 @@ def init_db():
             port INTEGER NOT NULL,
             action TEXT NOT NULL,
             timestamp TEXT NOT NULL,
-            message TEXT
+            message TEXT,
+            proto TEXT DEFAULT 'tcp'
         )
     ''')
     cur.execute('''
@@ -340,6 +341,7 @@ def init_db():
     ensure_column(conn, 'scan_logs', 'udp_ports', 'TEXT')
     ensure_column(conn, 'hosts', 'group_id', 'INTEGER')
     ensure_column(conn, 'hosts', 'comment', 'TEXT')
+    ensure_column(conn, 'alerts', 'proto', "TEXT DEFAULT 'tcp'")
 
     # разовый бэкфилл адресов из уже собранных открытых портов
     conn.execute('INSERT OR IGNORE INTO hosts (ip, first_seen, last_seen) '
@@ -1008,8 +1010,8 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                 # запись в историю делаем всегда, чтобы по адресу была видна
                 # вся история, начиная с первого сканирования
                 conn.execute('INSERT INTO alerts '
-                             '(ip, port, action, timestamp, message) '
-                             "VALUES (?, ?, 'opened', ?, ?)",
+                             '(ip, port, action, timestamp, message, proto) '
+                             "VALUES (?, ?, 'opened', ?, ?, 'udp')",
                              (ip, port, now,
                               f'Новый открытый UDP-порт {port} на {ip}'))
                 if ip in suppress:
@@ -1030,8 +1032,8 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
             if misses >= CLOSE_CONFIRM:
                 conn.execute('DELETE FROM port_state_udp WHERE ip = ? AND port = ?',
                              (ip, port))
-                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
-                             "VALUES (?, ?, 'closed', ?, ?)",
+                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message, proto) '
+                             "VALUES (?, ?, 'closed', ?, ?, 'udp')",
                              (ip, port, now, f'UDP-порт {port} закрыт на {ip}'))
                 add_event(conn, log_id, 'closed',
                           f'UDP-порт закрыт {ip}:{port} — убран из таблицы')
@@ -1158,8 +1160,8 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                              'VALUES (?, ?, ?, ?)', (ip, port, now, now))
                 # запись в историю делаем всегда, чтобы по адресу была видна
                 # вся история, начиная с первого сканирования
-                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
-                             "VALUES (?, ?, 'opened', ?, ?)",
+                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message, proto) '
+                             "VALUES (?, ?, 'opened', ?, ?, 'tcp')",
                              (ip, port, now, f'Новый открытый порт {port} на {ip}'))
                 if ip in suppress:
                     # первый скан адреса: фиксируем порт, но уведомление не шлём
@@ -2944,22 +2946,32 @@ def _host_history_events(ip):
     """Все события портов по адресу, от первого сканирования, по возрастанию."""
     conn = db()
     rows = conn.execute(
-        'SELECT port, action, timestamp FROM alerts WHERE ip = ? '
-        'ORDER BY timestamp ASC, id ASC', (ip,)).fetchall()
+        'SELECT port, action, timestamp, IFNULL(proto, \'tcp\') AS proto '
+        'FROM alerts WHERE ip = ? ORDER BY timestamp ASC, id ASC', (ip,)).fetchall()
 
     # если по порту нет записи об открытии (старые сканы, подавленные
     # уведомления), показываем первое обнаружение из port_state
-    opened_now = {r['port'] for r in rows if r['action'] == 'opened'}
+    opened_tcp = {r['port'] for r in rows
+                   if r['action'] == 'opened' and (r['proto'] or 'tcp') != 'udp'}
+    opened_udp = {r['port'] for r in rows
+                   if r['action'] == 'opened' and r['proto'] == 'udp'}
     synthetic = []
-    for table in ('port_state', 'port_state_udp'):
+    for table, proto in (('port_state', 'tcp'), ('port_state_udp', 'udp')):
         for r in conn.execute(
                 f'SELECT port, first_seen FROM {table} WHERE ip = ?', (ip,)):
-            if r['port'] not in opened_now:
+            present = opened_udp if proto == 'udp' else opened_tcp
+            if r['port'] not in present:
                 synthetic.append({'port': r['port'], 'action': 'opened',
+                                  'proto': proto,
                                   'timestamp': r['first_seen']})
     conn.close()
 
-    everything = [dict(r) for r in rows] + synthetic
+    everything = []
+    for r in rows:
+        item = dict(r)
+        item['proto'] = item.get('proto') or 'tcp'
+        everything.append(item)
+    everything.extend(synthetic)
     everything.sort(key=lambda r: (r['timestamp'] or '', r['action'] or ''))
 
     events = []
@@ -2969,11 +2981,17 @@ def _host_history_events(ip):
         item = index.get(key)
         if item is None:
             item = {'timestamp': row['timestamp'], 'action': row['action'],
-                    'ports': []}
+                    'ports': [], 'proto': []}
             index[key] = item
             events.append(item)
         if row['port'] not in item['ports']:
             item['ports'].append(row['port'])
+            item['proto'].append(row.get('proto') or 'tcp')
+    # порты по возрастанию, протокол едет вместе с номером
+    for item in events:
+        order = sorted(range(len(item['ports'])), key=lambda i: item['ports'][i])
+        item['ports'] = [item['ports'][i] for i in order]
+        item['proto'] = [item['proto'][i] for i in order]
     return events
 
 

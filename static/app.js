@@ -259,10 +259,13 @@
                     ' из ' + all.length + ' событий</div>';
             }
             recent.forEach(function (e) {
-                var ports = e.ports.map(function (p) {
-                    return '<span class="badge ' +
-                        (e.action === 'opened' ? 'badge-port' : 'bg-secondary') +
-                        ' me-1">' + p + '</span>';
+                var ports = (e.ports || []).map(function (p, i) {
+                    var proto = (e.proto && e.proto[i]) === 'udp' ? 'udp' : 'tcp';
+                    var cls = e.action === 'opened'
+                        ? (proto === 'udp' ? 'badge-port-udp' : 'badge-port')
+                        : 'bg-secondary';
+                    return '<span class="badge ' + cls + ' me-1" data-proto-tip="' +
+                        (proto === 'udp' ? 'UDP' : 'TCP') + ' ' + p + '">' + p + '</span>';
                 }).join('');
                 html += '<div class="np-history__row">' +
                     '<span class="np-history__time">' + window.npFmtDt(e.timestamp) + '</span>' +

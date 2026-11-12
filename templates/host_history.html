@@ -57,7 +57,11 @@
                     <td>
                         <div class="port-list">
                             {% for p in e['ports'] %}
-                            <span class="badge {% if e['action'] == 'opened' %}badge-port{% else %}bg-secondary{% endif %}">{{ p }}</span>
+                            {% set proto = e['proto'][loop.index0] if e['proto'] and e['proto']|length > loop.index0 else 'tcp' %}
+                            <span class="badge {% if e['action'] != 'opened' %}bg-secondary{% elif proto == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
+                                  title="{{ 'UDP' if proto == 'udp' else 'TCP' }} {{ p }}">
+                                <span class="np-proto-tag">{{ 'UDP' if proto == 'udp' else 'TCP' }}</span>{{ p }}
+                            </span>
                             {% endfor %}
                         </div>
                     </td>

@@ -126,6 +126,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
 /* ------------------------------------------------------------------ navbar */
 
 .app-nav {
+    background: var(--surface);
     background: color-mix(in srgb, var(--surface) 88%, transparent);
     backdrop-filter: saturate(180%) blur(12px);
     border-bottom: 1px solid var(--line);
@@ -161,6 +162,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
     height: 56px;
     display: block;
     border-radius: 14px;
+    filter: drop-shadow(0 6px 16px rgba(76, 110, 245, .38));
     filter: drop-shadow(0 6px 16px color-mix(in srgb, var(--brand) 38%, transparent));
     transition: transform .35s ease, filter .35s ease;
 }
@@ -168,6 +170,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
 .navbar-brand:hover .brand-logo,
 .navbar-brand:focus-visible .brand-logo {
     transform: scale(1.07) rotate(-4deg);
+    filter: drop-shadow(0 8px 24px rgba(79, 211, 255, .55));
     filter: drop-shadow(0 8px 24px color-mix(in srgb, #4fd3ff 55%, transparent));
 }
 
@@ -175,6 +178,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
     width: 152px;
     height: 152px;
     display: inline-block;
+    filter: drop-shadow(0 10px 30px rgba(76, 110, 245, .34));
     filter: drop-shadow(0 10px 30px color-mix(in srgb, var(--brand) 34%, transparent));
     animation: logo-float 6s ease-in-out infinite;
 }
@@ -194,10 +198,12 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
     transition: .15s;
 }
 
-.app-nav .nav-link:hover { color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.app-nav .nav-link:hover { color: var(--text); background: rgba(127, 127, 127, .12);
+    background: color-mix(in srgb, var(--text) 6%, transparent); }
 
 .app-nav .nav-link.active {
     color: var(--brand);
+    background: rgba(76, 110, 245, .12);
     background: color-mix(in srgb, var(--brand) 12%, transparent);
 }
 
@@ -246,6 +252,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
     --bs-table-color: var(--text);
     --bs-table-bg: transparent;
     --bs-table-hover-color: var(--text);
+    --bs-table-hover-bg: rgba(76, 110, 245, .06);
     --bs-table-hover-bg: color-mix(in srgb, var(--brand) 6%, transparent);
 }
 
@@ -262,6 +269,7 @@ h1, h2, h3, h4, h5 { font-weight: 700; letter-spacing: -.02em; }
 }
 
 .table > tbody > tr > td {
+    border-color: var(--line);
     border-color: color-mix(in srgb, var(--line) 70%, transparent);
     padding: .7rem .85rem;
     background: transparent;
@@ -282,6 +290,56 @@ a { color: var(--brand); }
 a:hover { color: var(--brand-dark); }
 
 .table-hover > tbody > tr:hover > * { background: var(--bs-table-hover-bg); }
+
+/* адрес на паузе: приглушаем строку цветом темы, а не бутстраповским серым */
+tr.table-secondary > td,
+tr.table-secondary > td * {
+    color: var(--muted) !important;
+}
+
+tr.table-secondary > td {
+    background: rgba(107, 118, 136, .08) !important;
+}
+
+[data-theme="dark"] tr.table-secondary > td {
+    background: rgba(139, 152, 173, .07) !important;
+}
+
+/* плитки статистики по адресу */
+.stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: .6rem;
+}
+
+.stat-tile {
+    padding: .6rem .8rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--chip-bg);
+}
+
+.stat-tile__value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+}
+
+.stat-tile__label { font-size: .76rem; color: var(--muted); }
+
+/* подпись протокола внутри чипа порта */
+.np-proto-tag {
+    display: inline-block;
+    font-size: .64rem;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    opacity: .75;
+    margin-right: .28rem;
+    padding-right: .28rem;
+    border-right: 1px solid rgba(127, 127, 127, .45);
+}
+
 
 th[data-sort] { cursor: pointer; user-select: none; }
 th[data-sort]:hover { color: var(--text); }
@@ -470,7 +528,8 @@ th[data-sort]:hover { color: var(--text); }
 }
 
 .channel[open] > summary::before { transform: rotate(90deg); }
-.channel > summary:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+.channel > summary:hover { background: rgba(127, 127, 127, .08);
+    background: color-mix(in srgb, var(--text) 4%, transparent); }
 .channel__title { font-weight: 600; }
 .channel > summary .badge { margin-left: auto; }
 .channel__body { padding: 0 1.15rem 1.15rem; }
@@ -506,18 +565,19 @@ th[data-sort]:hover { color: var(--text); }
 }
 
 .btn-outline-secondary:hover {
+    background: rgba(127, 127, 127, .14);
     background: color-mix(in srgb, var(--text) 7%, transparent);
     border-color: var(--line);
     color: var(--text);
 }
 
-.btn-outline-primary { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
+.btn-outline-primary { color: var(--brand); border-color: rgba(76, 110, 245, .45); border-color: color-mix(in srgb, var(--brand) 45%, transparent); }
 .btn-outline-primary:hover { background: var(--brand); border-color: var(--brand); color: #fff; }
-.btn-outline-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.btn-outline-danger { color: var(--danger); border-color: rgba(224, 49, 49, .45); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .btn-outline-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
-.btn-outline-warning { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.btn-outline-warning { color: var(--warn); border-color: rgba(245, 159, 0, .45); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .btn-outline-warning:hover { background: var(--warn); border-color: var(--warn); color: #2b1d00; }
-.btn-outline-success { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.btn-outline-success { color: var(--ok); border-color: rgba(18, 184, 134, .45); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .btn-outline-success:hover { background: var(--ok); border-color: var(--ok); color: #06231b; }
 
 /* ---------------------------------------------------------------- controls  */
@@ -531,11 +591,13 @@ th[data-sort]:hover { color: var(--text); }
     color: var(--text);
 }
 
-.form-control::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); }
+.form-control::placeholder { color: var(--muted); color: color-mix(in srgb, var(--muted) 75%, transparent); }
 
 .form-control:focus, .form-select:focus {
     background: var(--surface);
+    border-color: var(--brand);
     border-color: color-mix(in srgb, var(--brand) 55%, var(--line));
+    box-shadow: 0 0 0 3px rgba(76, 110, 245, .16);
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent);
     color: var(--text);
 }
@@ -686,7 +748,7 @@ th[data-sort]:hover { color: var(--text); }
 
 /* ----------------------------------------------------------------- progress */
 
-.progress { border-radius: 999px; background: color-mix(in srgb, var(--text) 8%, transparent); }
+.progress { border-radius: 999px; background: rgba(127, 127, 127, .16); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .progress-bar { border-radius: 999px; }
 
 /* тонкая линия прогресса сверху страницы */
@@ -786,7 +848,7 @@ th[data-sort]:hover { color: var(--text); }
     transition: .15s;
 }
 
-.scan-chip__stop:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.scan-chip__stop:hover { background: rgba(224, 49, 49, .14); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .scan-chip__stop:disabled { opacity: .5; }
 
 /* ------------------------------------------------------------------- log    */
