@@ -2747,28 +2747,59 @@ def ip_pause(ip):
     return redirect(request.referrer or url_for('dashboard'))
 
 
+def ports_for_ip(ip):
+    """Порты для проверки адреса: из расписания, иначе из последнего задания.
+
+    Раньше при пустом UDP-списке в последнем задании подставлялся набор UDP
+    по умолчанию — из-за этого «Проверить» находил UDP-порты, которых в
+    расписании нет."""
+    conn = db()
+    last = None
+    try:
+        try:
+            addr = ip_to_int(ip)
+        except ValueError:
+            addr = None
+        if addr is not None:
+            for row in conn.execute(
+                    'SELECT ip_range, ports, udp_ports FROM schedules '
+                    'ORDER BY id'):
+                try:
+                    start, end = parse_range(row['ip_range'])
+                except ValueError:
+                    continue
+                if start <= addr <= end:
+                    return (row['ports'] or DEFAULT_PORTS_STR,
+                            (row['udp_ports'] or '').strip())
+        last = conn.execute('SELECT ports, udp_ports FROM scan_logs '
+                            'ORDER BY id DESC LIMIT 1').fetchone()
+    finally:
+        conn.close()
+    if not last:
+        return DEFAULT_PORTS_STR, ''
+    return (last['ports'] or DEFAULT_PORTS_STR,
+            (last['udp_ports'] or '').strip())
+
+
 @app.route('/ip/<ip>/scan', methods=['POST'])
 @permission_required('scan')
 def ip_scan(ip):
-    """Проверить один адрес сейчас (порты — как в последнем сканировании)."""
+    """Проверить один адрес сейчас (порты — как в расписании для этого адреса)."""
     try:
         ip_to_int(ip)
     except ValueError:
         flash('Некорректный IP', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
-    conn = db()
-    last = conn.execute('SELECT ports, udp_ports FROM scan_logs '
-                        'ORDER BY id DESC LIMIT 1').fetchone()
-    conn.close()
-    ports = last['ports'] if last and last['ports'] else DEFAULT_PORTS_STR
-    udp_ports = last['udp_ports'] if last and last['udp_ports'] else DEFAULT_UDP_PORTS_STR
+    ports, udp_ports = ports_for_ip(ip)
     try:
         log_id = start_scan(f'{ip}-{ip}', ports, str(SCAN_WORKERS),
                             udp_ports_text=udp_ports)
     except ValueError as e:
         flash(f'Ошибка: {e}', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
-    flash(f'Проверка {ip} запущена (задание #{log_id}, порты: {ports})', 'success')
+    details = f'порты: {ports}'
+    details += f' · UDP: {udp_ports}' if udp_ports else ' · UDP не проверяется'
+    flash(f'Проверка {ip} запущена (задание #{log_id}, {details})', 'success')
     return redirect(request.referrer or url_for('dashboard'))
 
 
@@ -2960,20 +2991,15 @@ def api_hosts_bulk():
     now = datetime.now().isoformat(timespec='seconds')
 
     if action == 'scan':
-        conn = db()
-        last = conn.execute('SELECT ports, udp_ports FROM scan_logs '
-                            'ORDER BY id DESC LIMIT 1').fetchone()
-        conn.close()
-        ports = last['ports'] if last and last['ports'] else DEFAULT_PORTS_STR
-        udp_ports = (last['udp_ports'] if last and last['udp_ports']
-                     else DEFAULT_UDP_PORTS_STR)
+        ports, udp_ports = ports_for_ip(ips[0])
         try:
             log_id = start_scan_ips(ips, ports, udp_ports_text=udp_ports,
                                     workers_text=str(SCAN_WORKERS))
         except ValueError as e:
             return jsonify({'error': str(e)}), 400
         return jsonify({'status': 'started', 'log_id': log_id,
-                        'count': len(ips)})
+                        'count': len(ips), 'ports': ports,
+                        'udp_ports': udp_ports})
 
     conn = db()
     if action == 'group':
