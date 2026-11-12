@@ -543,6 +543,33 @@ th[data-sort]:hover { color: var(--text); }
 .form-label { font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: .3rem; }
 .form-text { font-size: .78rem; color: var(--muted); }
 
+/* ------------------------------------------------------------------ модалки */
+
+.modal-content {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+}
+
+.modal-header, .modal-footer { border-color: var(--line); }
+.modal-title { font-size: 1.02rem; font-weight: 650; }
+.modal-body { padding: 1.1rem 1.15rem; }
+.modal-backdrop.show { opacity: .5; }
+[data-theme="dark"] .btn-close { filter: invert(1) grayscale(1) brightness(1.8); }
+
+.group-list { --bs-list-group-bg: transparent; --bs-list-group-color: var(--text); }
+.group-list .list-group-item {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: .4rem;
+    padding: .55rem .7rem;
+}
+.group-list .list-group-item:hover { background: color-mix(in srgb, var(--text) 5%, var(--surface-2)); }
+
 .toolbar {
     display: flex;
     flex-wrap: wrap;

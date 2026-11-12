@@ -2083,6 +2083,29 @@ def api_group_create():
     return jsonify({'id': group_id, 'name': name})
 
 
+@app.route('/api/groups/<int:group_id>/rename', methods=['POST'])
+@role_required(*MANAGE_ROLES)
+def api_group_rename(group_id):
+    data = request.get_json(silent=True) or {}
+    name = ' '.join((data.get('name') or '').split())[:40]
+    if not name:
+        return jsonify({'error': 'Введите название группы'}), 400
+    conn = db()
+    if not conn.execute('SELECT 1 FROM host_groups WHERE id = ?',
+                        (group_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Группа не найдена'}), 404
+    other = conn.execute('SELECT id FROM host_groups WHERE name = ? COLLATE NOCASE '
+                         'AND id <> ?', (name, group_id)).fetchone()
+    if other:
+        conn.close()
+        return jsonify({'error': 'Группа с таким названием уже есть'}), 400
+    conn.execute('UPDATE host_groups SET name = ? WHERE id = ?', (name, group_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'id': group_id, 'name': name})
+
+
 @app.route('/api/groups/<int:group_id>', methods=['DELETE'])
 @role_required(*MANAGE_ROLES)
 def api_group_delete(group_id):
