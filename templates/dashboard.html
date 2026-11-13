@@ -227,8 +227,8 @@
                                       data-keep-scroll>
                                     <input type="hidden" name="mode" value="all">
                                     <button class="dropdown-item" type="submit"
-                                            title="Порты из расписания и всё, что уже находили у этого адреса">
-                                        Все порты и найденные
+                                            title="Порты из расписания и всё, что находили у адреса, включая закрытые">
+                                        Все порты включая закрытые
                                     </button>
                                 </form>
                             </li>
@@ -302,8 +302,9 @@
                        for="purgeProtoUdp">UDP</label>
             </div>
             <input id="purgePort" class="form-control form-control-sm np-purge__input"
-                   inputmode="numeric" maxlength="5" placeholder="53"
-                   aria-label="Номер порта">
+                   inputmode="numeric" maxlength="120" placeholder="53"
+                   aria-label="Номер порта, список или диапазон"
+                   title="Один порт, список через запятую или диапазон: 53,123,1900-1910">
             <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
             <div class="form-check form-check-inline mb-0 ms-1">
                 <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
@@ -311,6 +312,9 @@
                     Исключить его из всех расписаний
                 </label>
             </div>
+            <span class="small-muted np-purge__hint">
+                По одному или списком: 53, 123, 1900-1910
+            </span>
         </form>
     </div>
 </div>
@@ -753,9 +757,9 @@
                 var input = document.getElementById('purgePort');
                 var protoEl = purgeForm.querySelector('input[name="purgeProto"]:checked');
                 var proto = protoEl ? protoEl.value : 'both';
-                var port = parseInt((input.value || '').trim(), 10);
-                if (!port || port < 1 || port > 65535) {
-                    showToast('Введите номер порта от 1 до 65535');
+                var raw = (input.value || '').replace(/\s+/g, '');
+                if (!raw) {
+                    showToast('Введите номер порта, список или диапазон');
                     return;
                 }
                 var box = document.getElementById('purgeFromSchedules');
@@ -765,14 +769,17 @@
                 fetch('{{ url_for("api_ports_purge") }}', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ port: port, proto: proto,
+                    body: JSON.stringify({ ports: raw, proto: proto,
                                            update_schedules: withSchedules })
                 }).then(function (r) { return r.json(); }).then(function (res) {
                     if (res.error) { showToast(res.error); return; }
-                    stripPortFromTable(port, proto);
+                    (res.ports || []).forEach(function (p) {
+                        stripPortFromTable(p, proto);
+                    });
                     var protoText = proto === 'tcp' ? 'TCP' : proto === 'udp' ? 'UDP' : 'TCP и UDP';
-                    var text = 'Порт ' + port + ' (' + protoText + ') убран из таблицы, записей: '
-                        + res.deleted;
+                    var list = (res.ports || []).join(', ');
+                    var text = 'Убрано портов: ' + (res.ports || []).length
+                        + ' (' + list + '; ' + protoText + '), записей: ' + res.deleted;
                     if (res.schedules_updated) {
                         text += ' · расписаний обновлено: ' + res.schedules_updated;
                     }

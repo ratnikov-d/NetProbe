@@ -3224,38 +3224,96 @@ def api_group_delete(group_id):
     return jsonify({'status': 'ok'})
 
 
+def parse_port_list(text, limit=500):
+    """Разбирает «53», «53,123» или «1900-1910» в список портов."""
+    ports = set()
+    cleaned = ''.join((text or '').split())
+    for chunk in cleaned.replace(';', ',').split(','):
+        if not chunk:
+            continue
+        try:
+            if '-' in chunk:
+                a, b = chunk.split('-', 1)
+                try:
+                    a, b = int(a), int(b)
+                except ValueError:
+                    raise ValueError(f'Некорректный диапазон: {chunk}')
+                if a > b:
+                    a, b = b, a
+                if a < 1 or b > 65535:
+                    raise ValueError(f'Порт вне диапазона 1–65535: {chunk}')
+                if b - a > 1000:
+                    raise ValueError('Слишком большой диапазон (максимум 1000 портов)')
+                ports.update(range(a, b + 1))
+            else:
+                try:
+                    port = int(chunk)
+                except ValueError:
+                    raise ValueError(f'Некорректный порт: {chunk}')
+                if not 1 <= port <= 65535:
+                    raise ValueError(f'Порт вне диапазона 1–65535: {chunk}')
+                ports.add(port)
+        except ValueError as e:
+            raise ValueError(str(e))
+    if not ports:
+        raise ValueError('Введите номер порта')
+    if len(ports) > limit:
+        raise ValueError(f'Слишком много портов (максимум {limit})')
+    return sorted(ports)
+
+
+def compress_ports(ports):
+    """[80, 81, 82, 90] → «80-82,90»."""
+    ports = sorted(set(ports))
+    out = []
+    i = 0
+    while i < len(ports):
+        j = i
+        while j + 1 < len(ports) and ports[j + 1] == ports[j] + 1:
+            j += 1
+        if j - i >= 2:
+            out.append(f'{ports[i]}-{ports[j]}')
+        else:
+            out.extend(str(p) for p in ports[i:j + 1])
+        i = j + 1
+    return ','.join(out)
+
+
 @app.route('/api/ports/purge', methods=['POST'])
 @permission_required('purge')
 def api_ports_purge():
-    """Убирает порт из результатов (TCP и UDP) у всех адресов.
+    """Убирает порты из результатов (TCP и UDP) у всех адресов.
 
-    Нужно, когда провайдер/роутер перехватывает DNS и порт 53 «открыт» везде:
-    ввести 53, удалить из таблицы и, при желании, исключить из расписаний."""
+    Можно один порт, список через запятую или диапазон: 53, 123, 1900-1910.
+    Нужно, когда провайдер/роутер перехватывает DNS и порт 53 «открыт» везде."""
     data = request.get_json(silent=True) or {}
+    raw = data.get('ports')
+    if raw is None:
+        raw = data.get('port')
     try:
-        port = int(data.get('port'))
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Некорректный порт'}), 400
-    if not 1 <= port <= 65535:
-        return jsonify({'error': 'Некорректный порт'}), 400
+        ports = parse_port_list('' if raw is None else str(raw))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     conn = db()
     proto = (data.get('proto') or 'both').lower()
     if proto not in ('tcp', 'udp', 'both'):
         proto = 'both'
+    placeholders = ','.join('?' * len(ports))
     deleted_tcp = 0
     deleted_udp = 0
     if proto in ('tcp', 'both'):
-        deleted_tcp = conn.execute('DELETE FROM port_state WHERE port = ?',
-                                   (port,)).rowcount
+        deleted_tcp = conn.execute(
+            f'DELETE FROM port_state WHERE port IN ({placeholders})', ports).rowcount
     if proto in ('udp', 'both'):
-        deleted_udp = conn.execute('DELETE FROM port_state_udp WHERE port = ?',
-                                   (port,)).rowcount
+        deleted_udp = conn.execute(
+            f'DELETE FROM port_state_udp WHERE port IN ({placeholders})',
+            ports).rowcount
     deleted = max(deleted_tcp, 0) + max(deleted_udp, 0)
 
     schedules_updated = 0
     if data.get('update_schedules'):
-        target = str(port)
+        drop = set(ports)
         for row in conn.execute('SELECT id, ports, udp_ports FROM schedules'):
             tcp_list = [p.strip() for p in (row['ports'] or '').split(',') if p.strip()]
             udp_list = [p.strip() for p in (row['udp_ports'] or '').split(',')
@@ -3263,12 +3321,24 @@ def api_ports_purge():
             tcp_after = tcp_list
             udp_after = udp_list
             if proto in ('tcp', 'both'):
-                tcp_after = [p for p in tcp_list if p != target]
-                if not tcp_after:
+                try:
+                    left = set(parse_ports(row['ports'] or '')) - drop
+                except ValueError:
+                    left = set()
+                if left:
+                    tcp_after = compress_ports(left).split(',')
+                elif tcp_list:
                     # пустой TCP-список означает «порты по умолчанию»
                     tcp_after = tcp_list
             if proto in ('udp', 'both'):
-                udp_after = [p for p in udp_list if p != target]
+                try:
+                    left_udp = set(parse_udp_ports(row['udp_ports'] or '')) - drop
+                except ValueError:
+                    left_udp = set()
+                if left_udp:
+                    udp_after = compress_ports(left_udp).split(',')
+                elif drop & set(udp_list or []):
+                    udp_after = []
             if tcp_after == tcp_list and udp_after == udp_list:
                 continue
             conn.execute('UPDATE schedules SET ports = ?, udp_ports = ? WHERE id = ?',
@@ -3279,7 +3349,7 @@ def api_ports_purge():
     conn.close()
     return jsonify({'status': 'ok', 'deleted': deleted,
                     'deleted_tcp': deleted_tcp, 'deleted_udp': deleted_udp,
-                    'schedules_updated': schedules_updated})
+                    'schedules_updated': schedules_updated, 'ports': ports})
 
 
 @app.route('/api/hosts/bulk', methods=['POST'])
