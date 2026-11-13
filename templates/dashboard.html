@@ -196,11 +196,33 @@
                 <td class="text-muted small text-nowrap">{{ data.last_seen|dt }}</td>
                 <td class="text-muted small text-nowrap">{{ data.updated|dt }}</td>
                 <td class="text-end text-nowrap cell-actions">
-                    <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
-                          class="d-inline" data-keep-scroll>
-                        <button class="btn btn-sm btn-outline-primary" type="submit"
+                    <div class="btn-group btn-group-sm np-scan-menu" role="group">
+                        <button class="btn btn-outline-primary dropdown-toggle" type="button"
+                                data-bs-toggle="dropdown" aria-expanded="false"
                                 title="Проверить этот адрес сейчас">Проверить</button>
-                    </form>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li>
+                                <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
+                                      data-keep-scroll>
+                                    <input type="hidden" name="mode" value="full">
+                                    <button class="dropdown-item" type="submit"
+                                            title="Все порты из расписания адреса">
+                                        Полная проверка
+                                    </button>
+                                </form>
+                            </li>
+                            <li>
+                                <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
+                                      data-keep-scroll>
+                                    <input type="hidden" name="mode" value="known">
+                                    <button class="dropdown-item" type="submit"
+                                            title="Только порты, которые сейчас открыты у адреса">
+                                        Только обнаруженные порты
+                                    </button>
+                                </form>
+                            </li>
+                        </ul>
+                    </div>
                     {% if current_user.can('hosts') %}
                     {% if is_paused %}
                     <form method="POST" action="{{ url_for('ip_resume', ip=data.ip) }}"

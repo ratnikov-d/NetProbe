@@ -44,6 +44,11 @@ TCP_CONFIRM_TIMEOUT = float(os.environ.get('TCP_CONFIRM_TIMEOUT', '2.5'))
 TCP_CONFIRM_DELAY = float(os.environ.get('TCP_CONFIRM_DELAY', '1.0'))
 TCP_CONFIRM_WORKERS = int(os.environ.get('TCP_CONFIRM_WORKERS', '100'))
 CLOSE_CONFIRM = int(os.environ.get('CLOSE_CONFIRM', '2'))
+# Ранее открытый порт, который перестал отвечать, проверяем отдельно и сразу:
+# длинный таймаут и несколько кругов. Если не ответил ни в одном — закрываем
+# в этом же сканировании, не откладывая на следующие промахи.
+TCP_CLOSE_ROUNDS = int(os.environ.get('TCP_CLOSE_ROUNDS', '3'))
+UDP_CLOSE_ATTEMPTS = int(os.environ.get('UDP_CLOSE_ATTEMPTS', '3'))
 CHUNK_SIZE = int(os.environ.get('CHUNK_SIZE', '2000'))
 SCHED_TICK = int(os.environ.get('SCHED_TICK', '5'))
 
@@ -625,6 +630,9 @@ def chunks(seq, size):
 # --------------------------------------------------------------- уведомления
 
 SETTING_DEFAULTS = {
+    'notify_lang': 'ru',
+    'notify_opened_enabled': '1',
+    'notify_closed_enabled': '0',
     'telegram_enabled': '0',
     'telegram_token': '',
     'telegram_chat': '',
@@ -805,6 +813,45 @@ def notify(message, only=None):
 
 def notify_async(message):
     threading.Thread(target=notify, args=(message,), daemon=True).start()
+
+
+# тексты оповещений: настройка языка общая для всех каналов
+NOTIFY_TEXT = {
+    'ru': {
+        'opened': {'tcp': 'Новый открытый порт {port} на {ip}',
+                   'udp': 'Новый открытый UDP-порт {port} на {ip}'},
+        'closed': {'tcp': 'Порт {port} закрыт на {ip}',
+                   'udp': 'UDP-порт {port} закрыт на {ip}'},
+        'test': 'Тестовое уведомление от NetProbe',
+    },
+    'en': {
+        'opened': {'tcp': 'New open port {port} on {ip}',
+                   'udp': 'New open UDP port {port} on {ip}'},
+        'closed': {'tcp': 'Port {port} closed on {ip}',
+                   'udp': 'UDP port {port} closed on {ip}'},
+        'test': 'Test notification from NetProbe',
+    },
+}
+
+
+def notify_lang(cfg=None):
+    cfg = cfg if cfg is not None else get_settings()
+    return 'en' if str(cfg.get('notify_lang') or 'ru').lower() == 'en' else 'ru'
+
+
+def notify_text(kind, ip, port, proto='tcp', cfg=None):
+    """Текст события на выбранном языке: kind — opened/closed."""
+    lang = notify_lang(cfg)
+    proto = 'udp' if proto == 'udp' else 'tcp'
+    return NOTIFY_TEXT[lang][kind][proto].format(ip=ip, port=port)
+
+
+def notify_event(kind, ip, port, proto='tcp'):
+    """Отправляет оповещение, если в настройках включён этот тип событий."""
+    cfg = get_settings()
+    if cfg.get(f'notify_{kind}_enabled') != '1':
+        return
+    notify_async(notify_text(kind, ip, port, proto, cfg))
 
 
 
@@ -1021,7 +1068,7 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                 else:
                     add_event(conn, log_id, 'opened',
                               f'НОВЫЙ ОТКРЫТЫЙ UDP-ПОРТ {ip}:{port}')
-                    notify_async(f'Новый открытый UDP-порт {port} на {ip}')
+                    notify_event('opened', ip, port, 'udp')
                 opened += 1
                 changed.add(ip)
         elif row and not count_miss:
@@ -1037,6 +1084,7 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                              (ip, port, now, f'UDP-порт {port} закрыт на {ip}'))
                 add_event(conn, log_id, 'closed',
                           f'UDP-порт закрыт {ip}:{port} — убран из таблицы')
+                notify_event('closed', ip, port, 'udp')
             else:
                 conn.execute('UPDATE port_state_udp SET misses = ? '
                              'WHERE ip = ? AND port = ?', (misses, ip, port))
@@ -1100,6 +1148,7 @@ def scan_udp(conn, log_id, ips, ports, workers, suppress, stop_event=None):
     if not ips:
         return 0
     targets = [(ip, port) for ip in ips for port in ports]
+    known_udp = known_pairs(ips, ports, 'port_state_udp')
     conn.execute("UPDATE scan_logs SET udp_phase = 'scan' WHERE id = ?", (log_id,))
     conn.commit()
     opened, unanswered = _run_udp_phase(conn, log_id, targets, workers, suppress,
@@ -1115,12 +1164,27 @@ def scan_udp(conn, log_id, ips, ports, workers, suppress, stop_event=None):
         add_event(conn, log_id, 'info',
                   f'UDP-проверка без ответа: {len(unanswered)} портов, '
                   f'по {max(1, UDP_RETRIES)} попытки')
-        again, _ = _run_udp_phase(conn, log_id, unanswered, workers, suppress,
-                                  attempts=max(1, UDP_RETRIES), count_miss=True,
-                                  stop_event=stop_event)
+        again, still = _run_udp_phase(conn, log_id, unanswered, workers, suppress,
+                                      attempts=max(1, UDP_RETRIES), count_miss=True,
+                                      stop_event=stop_event)
         opened += again
         add_event(conn, log_id, 'info',
                   f'UDP-проверка завершена, новых портов: {again}')
+
+        # ранее открытый UDP-порт, который молчит: ещё один круг с большим
+        # числом попыток, чтобы закрыть его сразу, а не через сканирование
+        deep = [(ip, port) for ip, port in still if (ip, port) in known_udp]
+        if deep and not (stop_event is not None and stop_event.is_set()):
+            add_event(conn, log_id, 'info',
+                      f'Ранее открытые UDP-порты без ответа: {len(deep)} — '
+                      f'дополнительная проверка по {max(1, UDP_CLOSE_ATTEMPTS)} попытки')
+            time.sleep(UDP_RETRY_DELAY)
+            again, _ = _run_udp_phase(conn, log_id, deep, workers, suppress,
+                                      attempts=max(1, UDP_CLOSE_ATTEMPTS),
+                                      count_miss=True, stop_event=stop_event)
+            opened += again
+            add_event(conn, log_id, 'info',
+                      f'Дополнительная UDP-проверка завершена, новых портов: {again}')
 
     conn.execute("UPDATE scan_logs SET udp_phase = '' WHERE id = ?", (log_id,))
     conn.commit()
@@ -1173,7 +1237,7 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                               f'первый скан {ip}:{port} — без алерта')
                 else:
                     add_event(conn, log_id, 'opened', f'НОВЫЙ ОТКРЫТЫЙ ПОРТ {ip}:{port}')
-                    notify_async(f'Новый открытый порт {port} на {ip}')
+                    notify_event('opened', ip, port, 'tcp')
                 opened += 1
                 changed.add(ip)
         elif row and not count_miss:
@@ -1189,6 +1253,7 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                              (ip, port, now, f'Порт {port} закрыт на {ip}'))
                 add_event(conn, log_id, 'closed',
                           f'порт закрыт {ip}:{port} — убран из таблицы')
+                notify_event('closed', ip, port, 'tcp')
                 changed.add(ip)
             else:
                 # одиночный таймаут не считается закрытием порта
@@ -1203,8 +1268,106 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
     return opened
 
 
+def known_pairs(ips, ports, table='port_state'):
+    """Пары (ip, port), которые уже были открыты в прошлых сканированиях."""
+    if not ips or not ports:
+        return set()
+    wanted = set(ports)
+    conn = db()
+    known = set()
+    try:
+        for chunk in chunks(ips, 500):
+            placeholders = ','.join('?' * len(chunk))
+            rows = conn.execute(
+                f'SELECT ip, port FROM {table} WHERE ip IN ({placeholders})',
+                chunk).fetchall()
+            for row in rows:
+                if row['port'] in wanted:
+                    known.add((row['ip'], row['port']))
+    finally:
+        conn.close()
+    return known
+
+
+def close_ports(conn, log_id, pairs):
+    """Закрывает TCP-порты сразу: убирает из таблицы и пишет событие."""
+    now = datetime.now().isoformat(timespec='seconds')
+    changed = set()
+    for ip, port in pairs:
+        cur = conn.execute('DELETE FROM port_state WHERE ip = ? AND port = ?',
+                           (ip, port))
+        if not cur.rowcount:
+            continue
+        conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
+                     "VALUES (?, ?, 'closed', ?, ?)",
+                     (ip, port, now, f'Порт {port} закрыт на {ip}'))
+        changed.add(ip)
+        notify_event('closed', ip, port, 'tcp')
+    for ip in changed:
+        conn.execute('UPDATE hosts SET updated_at = ? WHERE ip = ?', (now, ip))
+    conn.commit()
+    return len(changed)
+
+
+def confirm_closed(conn, log_id, suspects, workers, suppress=None, stop_event=None):
+    """Детальная проверка ранее открытых портов, которые не ответили.
+
+    Порт был открыт и перестал отвечать — это не обычный промах: проверяем его
+    отдельно, длинным таймаутом и несколькими кругами. Если не ответил ни в
+    одном круге, закрываем сразу в этом же сканировании."""
+    if not suspects:
+        return 0
+    pairs = sorted({(ip, port) for ip, port in suspects})
+    rounds = max(1, TCP_CLOSE_ROUNDS)
+    add_event(conn, log_id, 'info',
+              f'Ранее открытые порты без ответа: {len(pairs)} — детальная проверка '
+              f'(до {rounds} кругов по {TCP_CONFIRM_TIMEOUT} с)')
+    opened = 0
+    pending = pairs
+    for rnd in range(rounds):
+        if not pending:
+            break
+        if stop_event is not None and stop_event.is_set():
+            break
+        if rnd:
+            time.sleep(TCP_CONFIRM_DELAY)
+        conf_workers = max(1, min(TCP_CONFIRM_WORKERS,
+                                  workers or TCP_CONFIRM_WORKERS, len(pending)))
+        still = []
+        found = []
+        with ThreadPoolExecutor(max_workers=conf_workers) as pool:
+            futures = [pool.submit(confirm_probe, ip, port) for ip, port in pending]
+            for fut in as_completed(futures):
+                if stop_event is not None and stop_event.is_set():
+                    for f in futures:
+                        f.cancel()
+                    break
+                ip, port, is_open, _ = fut.result()
+                if is_open:
+                    found.append((ip, port, True, None, 'open'))
+                else:
+                    still.append((ip, port))
+        if found:
+            opened += apply_batch(conn, log_id, found, suppress)
+            shown = ', '.join(f'{port}@{ip}' for ip, port in found[:10])
+            add_event(conn, log_id, 'info',
+                      f'Круг {rnd + 1}: снова отвечают {len(found)} — {shown}'
+                      + ('…' if len(found) > 10 else ''))
+        add_event(conn, log_id, 'info',
+                  f'Круг {rnd + 1}: перепроверено {len(pending)}, ответили {len(found)}')
+        pending = still
+
+    if pending and not (stop_event is not None and stop_event.is_set()):
+        close_ports(conn, log_id, pending)
+        shown = ', '.join(f'{port}@{ip}' for ip, port in pending[:20])
+        add_event(conn, log_id, 'closed',
+                  f'Закрыто сразу: {len(pending)} портов не ответили ни в одном из '
+                  f'{rounds} кругов — {shown}' + ('…' if len(pending) > 20 else ''))
+    return opened
+
+
 def run_chunk(pool, conn, log_id, chunk, stop_event, done, opened_total,
-              suppress=None, uncertain=None):
+              suppress=None, uncertain=None, known=None, suspects=None):
     futures = [pool.submit(probe, ip, port) for ip, port in chunk]
     batch = []
     opened = 0
@@ -1215,7 +1378,12 @@ def run_chunk(pool, conn, log_id, chunk, stop_event, done, opened_total,
                 break
             res = fut.result()
             batch.append(res)
-            if uncertain is not None and res[4] == 'timeout':
+            is_known = bool(known) and (res[0], res[1]) in known
+            if is_known and not res[2]:
+                # порт был открыт и не ответил — проверим отдельно и закроем сразу
+                if suspects is not None:
+                    suspects.append((res[0], res[1]))
+            elif uncertain is not None and res[4] == 'timeout':
                 uncertain.append((res[0], res[1]))
             processed += 1
             if len(batch) >= 100:
@@ -1364,6 +1532,9 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     # адреса, которые сканируются впервые: алерты по ним не отправляем
     suppress = set(ips) - known_ips(ips)
+    # порты, которые были открыты раньше: пропали из ответа — проверяем подробно
+    known = known_pairs(ips, ports)
+    suspects = []
 
     with _stop_lock:
         _stop_flags[log_id] = stop_event
@@ -1399,7 +1570,8 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                         if len(chunk) >= CHUNK_SIZE:
                             opened_total += run_chunk(pool, conn, log_id, chunk,
                                                       stop_event, done, opened_total,
-                                                      suppress, uncertain)
+                                                      suppress, uncertain, known,
+                                                      suspects)
                             done += len(chunk)
                             chunk = []
                             if stop_event.is_set():
@@ -1410,8 +1582,11 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
                 if chunk and not stop_event.is_set():
                     opened_total += run_chunk(pool, conn, log_id, chunk,
                                               stop_event, done, opened_total,
-                                              suppress, uncertain)
+                                              suppress, uncertain, known, suspects)
                     done += len(chunk)
+            if not stop_event.is_set() and suspects:
+                opened_total += confirm_closed(conn, log_id, suspects, workers,
+                                               suppress, stop_event)
             if not stop_event.is_set() and uncertain:
                 opened_total += confirm_timeouts(conn, log_id, uncertain, workers,
                                                  suppress, stop_event)
@@ -2476,7 +2651,8 @@ def settings_test(channel):
     save_settings(values)
 
     try:
-        sender(get_settings(), 'Тестовое уведомление от NetProbe')
+        cfg = get_settings()
+        sender(cfg, NOTIFY_TEXT[notify_lang(cfg)]['test'])
     except Exception as e:  # noqa: BLE001
         flash(f'Не отправлено ({channel}): {e}', 'danger')
     else:
@@ -2781,16 +2957,47 @@ def ports_for_ip(ip):
             (last['udp_ports'] or '').strip())
 
 
+def discovered_ports(ip):
+    """Порты, которые сейчас открыты у адреса (TCP и UDP)."""
+    conn = db()
+    try:
+        tcp = [r['port'] for r in conn.execute(
+            'SELECT port FROM port_state WHERE ip = ? ORDER BY port', (ip,))]
+        udp = [r['port'] for r in conn.execute(
+            'SELECT port FROM port_state_udp WHERE ip = ? ORDER BY port', (ip,))]
+    finally:
+        conn.close()
+    return tcp, udp
+
+
 @app.route('/ip/<ip>/scan', methods=['POST'])
 @permission_required('scan')
 def ip_scan(ip):
-    """Проверить один адрес сейчас (порты — как в расписании для этого адреса)."""
+    """Проверить один адрес сейчас.
+
+    mode=full  — все порты из расписания адреса;
+    mode=known — только порты, которые уже открыты у этого адреса."""
     try:
         ip_to_int(ip)
     except ValueError:
         flash('Некорректный IP', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
-    ports, udp_ports = ports_for_ip(ip)
+
+    mode = (request.form.get('mode') or 'full').strip()
+    if mode == 'known':
+        tcp_now, udp_now = discovered_ports(ip)
+        if tcp_now or udp_now:
+            ports = ','.join(str(p) for p in tcp_now) or DEFAULT_PORTS_STR
+            udp_ports = ','.join(str(p) for p in udp_now)
+            scope = (f'только обнаруженные порты: {len(tcp_now)} TCP, '
+                     f'{len(udp_now)} UDP')
+        else:
+            ports, udp_ports = ports_for_ip(ip)
+            scope = 'обнаруженных портов нет — полная проверка'
+    else:
+        ports, udp_ports = ports_for_ip(ip)
+        scope = 'полная проверка'
+
     try:
         log_id = start_scan(f'{ip}-{ip}', ports, str(SCAN_WORKERS),
                             udp_ports_text=udp_ports)
@@ -2799,7 +3006,8 @@ def ip_scan(ip):
         return redirect(request.referrer or url_for('dashboard'))
     details = f'порты: {ports}'
     details += f' · UDP: {udp_ports}' if udp_ports else ' · UDP не проверяется'
-    flash(f'Проверка {ip} запущена (задание #{log_id}, {details})', 'success')
+    flash(f'Проверка {ip} запущена ({scope}, задание #{log_id}, {details})',
+          'success')
     return redirect(request.referrer or url_for('dashboard'))
 
 

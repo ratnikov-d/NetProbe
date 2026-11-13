@@ -11,8 +11,46 @@
 {% include "_settings_tabs.html" %}
 
 <form method="POST" action="{{ url_for('settings') }}">
+    <div class="card mb-3">
+        <div class="card-header">Оповещения о портах</div>
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="notify_opened_enabled" name="notify_opened_enabled"
+                               {% if cfg.notify_opened_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="notify_opened_enabled">
+                            Об открытии нового порта
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="notify_closed_enabled" name="notify_closed_enabled"
+                               {% if cfg.notify_closed_enabled == '1' %}checked{% endif %}>
+                        <label class="form-check-label" for="notify_closed_enabled">
+                            О закрытии порта
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="notify_lang">Язык сообщений</label>
+                    <select class="form-select" id="notify_lang" name="notify_lang">
+                        <option value="ru" {% if cfg.notify_lang != 'en' %}selected{% endif %}>Русский</option>
+                        <option value="en" {% if cfg.notify_lang == 'en' %}selected{% endif %}>English</option>
+                    </select>
+                </div>
+            </div>
+            <div class="small-muted mt-3">
+                Пример сообщения: <span id="notifyPreviewText">—</span>
+            </div>
+        </div>
+    </div>
+
     <div class="card">
-        <div class="card-header">Уведомления об открытых портах</div>
+        <div class="card-header">Каналы доставки</div>
         <div class="card-body p-0">
 
             <details class="channel" {% if cfg.telegram_enabled == '1' %}open{% endif %}>
@@ -324,6 +362,31 @@
             syncPort();
         });
     }
+
+    var opened = document.getElementById('notify_opened_enabled');
+    var closed = document.getElementById('notify_closed_enabled');
+    var lang = document.getElementById('notify_lang');
+    var preview = document.getElementById('notifyPreviewText');
+    var TEXT = {
+        ru: {opened: 'Новый открытый порт 80 на 10.0.0.1',
+             closed: 'Порт 80 закрыт на 10.0.0.1'},
+        en: {opened: 'New open port 80 on 10.0.0.1',
+             closed: 'Port 80 closed on 10.0.0.1'}
+    };
+
+    function renderPreview() {
+        if (!preview) return;
+        var t = TEXT[(lang && lang.value) || 'ru'] || TEXT.ru;
+        var parts = [];
+        if (opened && opened.checked) parts.push(t.opened);
+        if (closed && closed.checked) parts.push(t.closed);
+        preview.textContent = parts.length ? parts.join(' · ') : 'оповещения о портах выключены';
+    }
+
+    [opened, closed, lang].forEach(function (el) {
+        if (el) el.addEventListener('change', renderPreview);
+    });
+    renderPreview();
 })();
 </script>
 {% endblock %}
