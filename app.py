@@ -3010,6 +3010,25 @@ def discovered_ports(ip):
     return tcp, udp
 
 
+def history_ports(ip):
+    """Все порты адреса за всю историю: текущие и уже закрытые."""
+    conn = db()
+    try:
+        tcp = {r['port'] for r in conn.execute(
+            "SELECT DISTINCT port FROM alerts WHERE ip = ? "
+            "AND IFNULL(proto, 'tcp') != 'udp'", (ip,))}
+        udp = {r['port'] for r in conn.execute(
+            "SELECT DISTINCT port FROM alerts WHERE ip = ? AND proto = 'udp'",
+            (ip,))}
+        tcp.update(r['port'] for r in conn.execute(
+            'SELECT port FROM port_state WHERE ip = ?', (ip,)))
+        udp.update(r['port'] for r in conn.execute(
+            'SELECT port FROM port_state_udp WHERE ip = ?', (ip,)))
+    finally:
+        conn.close()
+    return sorted(tcp), sorted(udp)
+
+
 @app.route('/ip/<ip>/scan', methods=['POST'])
 @permission_required('scan')
 def ip_scan(ip):
@@ -3035,17 +3054,19 @@ def ip_scan(ip):
             ports, udp_ports = ports_for_ip(ip)
             scope = 'обнаруженных портов нет — полная проверка'
     elif mode == 'all':
-        # порты из расписания + всё, что когда-либо находили у адреса
-        tcp_now, udp_now = discovered_ports(ip)
+        # порты из расписания + всё, что когда-либо находили у адреса,
+        # включая уже закрытые порты
+        hist_tcp, hist_udp = history_ports(ip)
         sched_tcp, sched_udp = ports_for_ip(ip)
         try:
-            tcp = sorted(set(parse_ports(sched_tcp)) | set(tcp_now))
-            udp = sorted(set(parse_udp_ports(sched_udp)) | set(udp_now))
+            tcp = sorted(set(parse_ports(sched_tcp)) | set(hist_tcp))
+            udp = sorted(set(parse_udp_ports(sched_udp)) | set(hist_udp))
         except ValueError:
-            tcp, udp = tcp_now, udp_now
+            tcp, udp = hist_tcp, hist_udp
         ports = ','.join(str(p) for p in tcp) or DEFAULT_PORTS_STR
         udp_ports = ','.join(str(p) for p in udp)
-        scope = f'все порты и найденные: {len(tcp)} TCP, {len(udp)} UDP'
+        scope = (f'все порты и найденные, включая закрытые: {len(tcp)} TCP, '
+                 f'{len(udp)} UDP')
     else:
         ports, udp_ports = ports_for_ip(ip)
         scope = 'полная проверка'
