@@ -851,6 +851,9 @@ def send_email(cfg, message):
             pass
 
 
+# образец события для кнопки «Тестовое событие» в настройках
+TEST_EVENT = {'ip': '10.0.0.1', 'port': 80, 'proto': 'tcp'}
+
 CHANNEL_SENDERS = {
     'telegram': send_telegram,
     'max': send_max,
@@ -2880,7 +2883,16 @@ def settings():
         flash('Настройки сохранены', 'success')
         return redirect(url_for('settings'))
 
-    return render_template('settings.html', cfg=get_settings(), title='Настройки')
+    return render_template('settings.html', cfg=get_settings(),
+                           test_event=TEST_EVENT, title='Настройки')
+
+
+@app.route('/settings/save', methods=['POST'])
+@permission_required('settings')
+def settings_save():
+    """Автосохранение формы настроек при изменении любого поля."""
+    save_settings(form_settings_values())
+    return jsonify(ok=True)
 
 
 @app.route('/settings/groups')
@@ -2915,6 +2927,30 @@ def settings_test(channel):
         flash(f'Не отправлено ({channel}): {e}', 'danger')
     else:
         flash(f'Тестовое сообщение отправлено: {channel}', 'success')
+    return redirect(url_for('settings'))
+
+
+@app.route('/settings/test-event/<channel>', methods=['POST'])
+@permission_required('settings')
+def settings_test_event(channel):
+    """Отправляет в канал событие в том же виде, что и настоящее оповещение."""
+    sender = CHANNEL_SENDERS.get(channel)
+    if not sender:
+        flash('Неизвестный канал уведомлений', 'danger')
+        return redirect(url_for('settings'))
+
+    # сохраняем то, что ввели в форме, чтобы проверять актуальные значения
+    save_settings(form_settings_values())
+
+    cfg = get_settings()
+    message = notify_text('opened', TEST_EVENT['ip'], TEST_EVENT['port'],
+                          TEST_EVENT['proto'], cfg, channel)
+    try:
+        sender(cfg, message)
+    except Exception as e:  # noqa: BLE001
+        flash(f'Не отправлено ({channel}): {e}', 'danger')
+    else:
+        flash(f'Тестовое событие отправлено: {channel} — {message}', 'success')
     return redirect(url_for('settings'))
 
 

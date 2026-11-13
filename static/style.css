@@ -640,6 +640,24 @@ th[data-sort]:hover { color: var(--text); }
 .channel > summary .badge { margin-left: auto; }
 .channel__body { padding: 0 1.15rem 1.15rem; }
 
+.channel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    margin-top: 1rem;
+    padding-top: .9rem;
+    border-top: 1px dashed var(--line);
+}
+
+.channel__actions .form-text { margin: 0; }
+
+/* индикатор автосохранения в шапке карточки настроек */
+.save-state { font-size: .8rem; font-weight: 600; }
+.save-state--busy { color: var(--muted); }
+.save-state--ok { color: var(--ok); }
+.save-state--error { color: var(--danger); }
+
 /* порты в расписании: перенос между портами, но не внутри номера */
 .port-token { display: inline-block; white-space: nowrap; }
 .port-sep { color: var(--muted); }
@@ -654,6 +672,9 @@ th[data-sort]:hover { color: var(--text); }
 
 .btn { border-radius: 10px; font-weight: 600; }
 .btn-sm { padding: .3rem .65rem; font-size: .82rem; }
+
+/* кнопка вровень по высоте с .form-control */
+.btn-input { padding: .5rem .9rem; font-size: .9rem; line-height: 1.5; }
 
 .btn-primary {
     background: var(--brand);
