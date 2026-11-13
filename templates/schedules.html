@@ -100,15 +100,15 @@
                     data-status="{{ 'on' if s['enabled'] else 'off' }}"
                     data-last="{{ s['last_run'] or '' }}"
                     data-next="{{ s['next_run'] or '' }}">
-                    <td>
+                    <td class="sched-range-cell">
                         <div class="mono nowrap">{{ s['ip_range'] }}</div>
                         {% if rb.count > 1 %}
-                        <div class="small-muted nowrap">
+                        <div class="small-muted sched-range-sub">
                             {{ rb.first }} – {{ rb.last }} · {{ rb.count }} адр.
                         </div>
                         {% endif %}
                     </td>
-                    <td class="mono small-muted py-1" style="min-width: 220px; font-size: .78rem; line-height: 1.35;">
+                    <td class="mono small-muted py-1 sched-ports-cell">
                         <div>
                             <span class="badge badge-port me-1">TCP</span>
                             {% for p in s['ports'].split(',') %}<span class="port-token">{{ p.strip() }}</span>{% if not loop.last %}<span class="port-sep">,</span>{% endif %}{% endfor %}
@@ -134,34 +134,55 @@
                     </td>
                     <td class="small-muted nowrap">{{ s['last_run']|dt }}</td>
                     <td class="small-muted nowrap">{{ s['next_run']|dt }}</td>
-                    <td class="text-end nowrap">
+                    <td class="text-end sched-actions">
                         {% if current_user.can('schedules') %}
-                        <div class="d-inline-flex gap-1">
-                            <button class="btn btn-sm btn-outline-secondary edit-sched" type="button"
-                                    data-id="{{ s['id'] }}"
-                                    data-ports="{{ s['ports'] }}"
-                                    data-udp="{{ s['udp_ports'] or '' }}"
-                                    data-workers="{{ s['workers'] or '' }}"
-                                    data-interval="{{ s['interval_minutes'] }}">Изменить</button>
-                            <form method="POST" action="{{ url_for('schedule_run', sid=s['id']) }}">
-                                <button class="btn btn-sm btn-outline-primary" type="submit">Запустить</button>
-                            </form>
-                            <button class="btn btn-sm btn-outline-secondary clear-sched" type="button"
-                                    data-id="{{ s['id'] }}"
-                                    data-range="{{ s['ip_range'] }}"
-                                    title="Убрать результаты и историю по этому диапазону">Очистить историю</button>
-                            <form method="POST" action="{{ url_for('schedule_toggle', sid=s['id']) }}">
-                                {% if s['enabled'] %}
-                                <button class="btn btn-sm btn-danger" type="submit">Выключить</button>
-                                {% else %}
-                                <button class="btn btn-sm btn-success" type="submit">Включить</button>
-                                {% endif %}
-                            </form>
-                            <form method="POST" action="{{ url_for('schedule_delete', sid=s['id']) }}"
-                                  onsubmit="return confirm('Удалить расписание {{ s['ip_range'] }}? Результаты по этому диапазону тоже будут удалены.');">
-                                <button class="btn btn-sm btn-outline-danger" type="submit"
-                                        title="Удаляется расписание и результаты диапазона">Удалить</button>
-                            </form>
+                        <div class="btn-group btn-group-sm np-scan-menu" role="group"
+                             data-np-fixed-menu>
+                            <button class="btn btn-outline-primary dropdown-toggle" type="button"
+                                    data-bs-toggle="dropdown" aria-expanded="false"
+                                    title="Действия с расписанием {{ s['ip_range'] }}">Действия</button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li>
+                                    <button class="dropdown-item edit-sched" type="button"
+                                            data-id="{{ s['id'] }}"
+                                            data-ports="{{ s['ports'] }}"
+                                            data-udp="{{ s['udp_ports'] or '' }}"
+                                            data-workers="{{ s['workers'] or '' }}"
+                                            data-interval="{{ s['interval_minutes'] }}">Изменить порты и интервал</button>
+                                </li>
+                                <li>
+                                    <form method="POST" action="{{ url_for('schedule_run', sid=s['id']) }}"
+                                          data-keep-scroll>
+                                        <button class="dropdown-item" type="submit"
+                                                title="Запустить сканирование по этому расписанию сейчас">Запустить сейчас</button>
+                                    </form>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <button class="dropdown-item clear-sched" type="button"
+                                            data-id="{{ s['id'] }}"
+                                            data-range="{{ s['ip_range'] }}"
+                                            title="Убрать результаты и историю по этому диапазону">Очистить историю…</button>
+                                </li>
+                                <li>
+                                    <form method="POST" action="{{ url_for('schedule_toggle', sid=s['id']) }}"
+                                          data-keep-scroll>
+                                        {% if s['enabled'] %}
+                                        <button class="dropdown-item text-danger" type="submit">Выключить расписание</button>
+                                        {% else %}
+                                        <button class="dropdown-item text-success" type="submit">Включить расписание</button>
+                                        {% endif %}
+                                    </form>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <form method="POST" action="{{ url_for('schedule_delete', sid=s['id']) }}"
+                                          onsubmit="return confirm('Удалить расписание {{ s['ip_range'] }}? Результаты по этому диапазону тоже будут удалены.');">
+                                        <button class="dropdown-item text-danger" type="submit"
+                                                title="Удаляется расписание и результаты диапазона">Удалить расписание…</button>
+                                    </form>
+                                </li>
+                            </ul>
                         </div>
                         {% else %}
                         <span class="small-muted">только просмотр</span>
@@ -269,8 +290,18 @@
     var modal = new bootstrap.Modal(modalEl);
     var form = document.getElementById('schedEditForm');
 
+    // пункт меню «Действия»: закрываем выпадающее меню перед открытием окна
+    function closeMenu(btn) {
+        var group = btn.closest('.btn-group');
+        var toggle = group ? group.querySelector('.dropdown-toggle') : null;
+        if (toggle && typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
+            bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
+        }
+    }
+
     document.querySelectorAll('.edit-sched').forEach(function (btn) {
         btn.addEventListener('click', function () {
+            closeMenu(btn);
             form.action = '/schedules/' + btn.dataset.id + '/update';
             document.getElementById('editPorts').value = btn.dataset.ports || '';
             document.getElementById('editUdp').value = btn.dataset.udp || '';
@@ -289,6 +320,7 @@
     var clearForm = document.getElementById('clearHistoryForm');
     document.querySelectorAll('.clear-sched').forEach(function (btn) {
         btn.addEventListener('click', function () {
+            closeMenu(btn);
             clearForm.action = '/schedules/' + btn.dataset.id + '/clear-history';
             document.getElementById('clearRange').textContent = btn.dataset.range;
             document.getElementById('clearRescan').checked = true;

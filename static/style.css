@@ -1305,6 +1305,27 @@ pre.log {
 
 #logsTable td, #logsTable th { vertical-align: top; }
 
+/* расписание: узкие колонки и перенос длинных списков портов,
+   иначе таблица шире экрана на ноутбуке */
+#schedTable th { white-space: normal; }
+
+#schedTable td { vertical-align: top; }
+
+#schedTable .sched-range-cell { max-width: 190px; }
+
+#schedTable .sched-range-sub { white-space: normal; }
+
+#schedTable .sched-ports-cell {
+    max-width: 300px;
+    overflow-wrap: anywhere;
+    font-size: .78rem;
+    line-height: 1.35;
+}
+
+#schedTable .port-token { white-space: nowrap; }
+
+#schedTable .sched-actions { width: 1%; white-space: nowrap; }
+
 .last-scan { margin-bottom: .85rem; }
 
 .app-footer {
