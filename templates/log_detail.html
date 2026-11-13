@@ -32,7 +32,7 @@
             <div class="col-md-3"><span class="text-muted">Начало:</span> {{ job['start_time']|dt }}</div>
             <div class="col-md-3"><span class="text-muted">Конец:</span> {{ job['end_time']|dt }}</div>
             <div class="col-md-2"><span class="text-muted">Статус:</span> {{ job['status']|status_ru }}</div>
-            <div class="col-md-2"><span class="text-muted">Новые/закрытые порты:</span>
+            <div class="col-md-2"><span class="text-muted">Обнаружения портов:</span>
                 <button type="button" class="np-log-count" data-log-id="{{ job['id'] }}"
                         title="Открыто: {{ job['open_found'] or 0 }} · закрыто: {{ job['closed_found'] or 0 }}. Нажмите, чтобы посмотреть список">{{ (job['open_found'] or 0) + (job['closed_found'] or 0) }}</button>
             </div>

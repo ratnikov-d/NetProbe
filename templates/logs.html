@@ -5,9 +5,6 @@
 {% block content %}
 <div class="page-head">
     <h2>История сканирований</h2>
-    {% if current_user.can('scan') %}
-    <a href="{{ url_for('quick') }}" class="btn btn-sm btn-primary">Разовое сканирование</a>
-    {% endif %}
 </div>
 
 <div class="toolbar">
@@ -27,7 +24,7 @@
                     <th data-sort="ports">Порты <span class="sort-mark"></span></th>
                     <th data-sort="status">Статус <span class="sort-mark"></span></th>
                     <th data-sort="progress" style="min-width: 120px;">Прогресс <span class="sort-mark"></span></th>
-                    <th data-sort="open">Новые/закрытые порты <span class="sort-mark"></span></th>
+                    <th data-sort="open">Обнаружения портов <span class="sort-mark"></span></th>
                     <th data-sort="start">Начало <span class="sort-mark"></span></th>
                     <th data-sort="end">Конец <span class="sort-mark"></span></th>
                     <th class="text-end">Действия</th>

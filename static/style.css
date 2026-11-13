@@ -409,7 +409,7 @@ th[data-sort]:hover { color: var(--text); }
     border-color: var(--line);
 }
 
-/* число новых/закрытых портов в логе: открывает список портов задания */
+/* число обнаружений в логе: открывает список портов задания */
 .np-log-count {
     border: 0;
     background: none;

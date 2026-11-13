@@ -41,7 +41,10 @@
                         <button type="button" class="ip-link" data-ip="{{ alert['ip'] }}"
                                 title="История по адресу">{{ alert['ip'] }}</button>
                     </td>
-                    <td><span class="badge badge-port">{{ alert['port'] }}</span></td>
+                    <td>
+                        <span class="badge {% if alert['proto'] == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
+                              title="{% if alert['proto'] == 'udp' %}UDP{% else %}TCP{% endif %}">{{ alert['port'] }}</span>
+                    </td>
                     <td class="nowrap">
                         {% if alert['action'] == 'opened' %}
                         <span class="badge bg-success">открыт</span>
