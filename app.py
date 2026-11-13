@@ -23,6 +23,9 @@ from wtforms.validators import DataRequired, Length, Optional
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'change-me-in-production')
+if not os.environ.get('SECRET_KEY'):
+    print('[NetProbe] SECRET_KEY не задан — используется небезопасное значение '
+          'по умолчанию, задайте SECRET_KEY в переменных окружения', flush=True)
 
 # часовой пояс: по умолчанию Москва, переопределяется переменной TZ
 os.environ.setdefault('TZ', 'Europe/Moscow')

@@ -6,6 +6,10 @@
 
 Исходный код и полная документация: <https://github.com/ratnikov-d/NetProbe>
 
+![Результаты сканирования](https://raw.githubusercontent.com/ratnikov-d/NetProbe/main/docs/screenshots/01-dashboard.png)
+
+Тёмная тема: <https://raw.githubusercontent.com/ratnikov-d/NetProbe/main/docs/screenshots/07-dashboard-dark.png>
+
 ## Платформы
 
 `linux/amd64`, `linux/arm64`, `linux/arm/v7` (Raspberry Pi).

@@ -17,6 +17,20 @@
 - **Исходный код:** [github.com/ratnikov-d/NetProbe](https://github.com/ratnikov-d/NetProbe)
 - **Интерфейс:** русский, темы светлая и тёмная
 
+![Результаты сканирования](docs/screenshots/01-dashboard.png)
+
+## Скриншоты
+
+| Расписание | События |
+|---|---|
+| ![Периодическое сканирование](docs/screenshots/03-schedules.png) | ![События](docs/screenshots/05-events.png) |
+| **История адреса** | **Тёмная тема** |
+| ![История адреса](docs/screenshots/06-host-history.png) | ![Тёмная тема](docs/screenshots/07-dashboard-dark.png) |
+| **Лог сканирований** | **Разовое сканирование** |
+| ![Лог сканирований](docs/screenshots/04-scan-history.png) | ![Разовое сканирование](docs/screenshots/02-quick-scan.png) |
+
+> Скриншоты сняты на демонстрационных данных: адреса и комментарии вымышлены.
+
 ## Содержание
 
 - [Быстрый старт](#быстрый-старт)
@@ -177,13 +191,40 @@ docker compose up -d          # или: docker restart netprobe
 
 ## HTTPS через Traefik
 
-В репозитории есть готовый `docker-compose.traefik.yml`: внешняя сеть `shared-net`,
-TLS через Lets Encrypt, домен из `NETPROBE_DOMAIN`.
+Внешний reverse-proxy не входит в поставку: контейнер слушает HTTP на 5000, TLS
+и домен настраиваются на стороне Traefik. Минимальный набор меток:
 
-```bash
-cp .env.example .env         # SECRET_KEY, NETPROBE_DOMAIN, TRAEFIK_*
-docker compose -f docker-compose.traefik.yml up -d
+```yaml
+services:
+  netprobe:
+    image: ruiiru/netprobe:latest
+    container_name: netprobe-web
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - TZ=${TZ:-Europe/Moscow}
+    volumes:
+      - netprobe_data:/app/data
+    networks: [traefik]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK}"
+      - "traefik.http.routers.netprobe.rule=Host(`${NETPROBE_DOMAIN}`)"
+      - "traefik.http.routers.netprobe.entrypoints=websecure"
+      - "traefik.http.routers.netprobe.tls.certresolver=letsencrypt"
+      - "traefik.http.services.netprobe.loadbalancer.server.port=5000"
+
+volumes:
+  netprobe_data:
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK}
 ```
+
+Сеть должна быть создана заранее (`docker network create <имя>`), Traefik — настроен
+на тот же certresolver.
 
 ## Сборка из исходников
 
@@ -244,15 +285,11 @@ docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
 ```
 netprobe/
 ├── app.py                      # Flask: сканирование, планировщик, API
-├── static/
-│   ├── style.css               # темы и оформление
-│   ├── app.js                  # тема, подсказки, прогресс
-│   ├── table.js                # поиск и сортировка таблиц
-│   └── logo.svg                # логотип
+├── static/                     # style.css, app.js, table.js, logo.svg
 ├── templates/                  # Jinja2: layout, dashboard, quick, schedules, logs, alerts, settings, users
+├── docs/screenshots/           # скриншоты для README
 ├── Dockerfile
 ├── docker-compose.yml
-├── docker-compose.traefik.yml
 ├── .env.example
 ├── requirements.txt
 ├── LICENSE

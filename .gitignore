@@ -9,3 +9,6 @@ venv/
 .idea/
 .vscode/
 *.log
+
+docker-compose.traefik.yml
+AGENTS.md
