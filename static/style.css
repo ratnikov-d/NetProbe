@@ -1065,6 +1065,24 @@ pre.log {
     line-height: 1.5;
 }
 
+/* проверка порта: протокол и порт одной строкой */
+.np-scan-port {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+.np-scan-port .np-proto-pick { gap: .3rem; }
+
+.np-scan-port .np-proto-pick__chip {
+    padding: .3rem .7rem;
+    font-size: .8rem;
+    line-height: 1.45;
+}
+
+.np-scan-port__input { width: 170px; flex: 0 1 170px; }
+
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
     color: #7ee2c0;
     background: rgba(45, 212, 160, .18);
