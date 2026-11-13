@@ -1067,27 +1067,33 @@ pre.log {
 
 /* проверка порта: протокол и порт одной строкой */
 @media (min-width: 576px) {
-    .np-scan-port-dialog { max-width: 580px; }
+    .np-scan-port-dialog { max-width: 480px; }
 }
 
 .np-scan-port {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: .5rem;
+    flex-wrap: nowrap;
+    gap: .4rem;
 }
 
-.np-scan-port .np-proto-pick { gap: .3rem; }
+.np-scan-port .np-proto-pick { gap: .25rem; flex: 0 0 auto; }
 
 .np-scan-port .np-proto-pick__chip {
-    padding: .3rem .7rem;
-    font-size: .8rem;
+    padding: .26rem .6rem;
+    font-size: .78rem;
     line-height: 1.45;
+    white-space: nowrap;
 }
 
-.np-scan-port__input { width: 140px; flex: 0 1 140px; }
+.np-scan-port__input { width: 116px; min-width: 0; flex: 0 1 116px; }
 
-.np-scan-port .btn { flex: 0 0 auto; }
+.np-scan-port .btn { flex: 0 0 auto; white-space: nowrap; }
+
+/* на узких экранах диалог во всю ширину — разрешаем перенос, чтобы не резать кнопку */
+@media (max-width: 575.98px) {
+    .np-scan-port { flex-wrap: wrap; }
+}
 
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
     color: #7ee2c0;
