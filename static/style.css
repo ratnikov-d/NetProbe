@@ -1067,7 +1067,7 @@ pre.log {
 
 /* проверка порта: протокол и порт одной строкой */
 @media (min-width: 576px) {
-    .np-scan-port-dialog { max-width: 480px; }
+    .np-scan-port-dialog { max-width: 400px; }
 }
 
 .np-scan-port {
@@ -1086,7 +1086,7 @@ pre.log {
     white-space: nowrap;
 }
 
-.np-scan-port__input { width: 116px; min-width: 0; flex: 0 1 116px; }
+.np-scan-port__input { flex: 1 1 auto; width: auto; min-width: 0; }
 
 .np-scan-port .btn { flex: 0 0 auto; white-space: nowrap; }
 
