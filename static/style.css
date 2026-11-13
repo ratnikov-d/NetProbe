@@ -1047,9 +1047,13 @@ pre.log {
 }
 
 .np-proto-pick__input:checked + .np-proto-pick__chip--both {
-    color: var(--brand-dark);
-    background: rgba(76, 110, 245, .14);
-    border-color: rgba(76, 110, 245, .5);
+    color: var(--text);
+    background: linear-gradient(90deg,
+        rgba(18, 184, 134, .26) 0%,
+        rgba(18, 184, 134, .16) 38%,
+        rgba(139, 92, 246, .16) 62%,
+        rgba(139, 92, 246, .28) 100%);
+    border-color: rgba(120, 130, 200, .45);
 }
 
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
@@ -1065,9 +1069,13 @@ pre.log {
 }
 
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--both {
-    color: #a9bcff;
-    background: rgba(124, 156, 255, .2);
-    border-color: rgba(124, 156, 255, .55);
+    color: #e7ecf6;
+    background: linear-gradient(90deg,
+        rgba(45, 212, 160, .28) 0%,
+        rgba(45, 212, 160, .18) 38%,
+        rgba(167, 139, 250, .18) 62%,
+        rgba(167, 139, 250, .32) 100%);
+    border-color: rgba(140, 160, 220, .45);
 }
 
 /* незаметная панель под таблицей */

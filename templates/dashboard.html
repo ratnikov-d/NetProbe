@@ -333,11 +333,17 @@
                     <p class="small-muted mb-3">Адрес: <span class="mono" id="scanPortIp">—</span></p>
                     <div class="row g-3">
                         <div class="col-6">
-                            <label class="form-label small" for="scanPortProto">Протокол</label>
-                            <select class="form-select" id="scanPortProto" name="proto">
-                                <option value="tcp">TCP</option>
-                                <option value="udp">UDP</option>
-                            </select>
+                            <label class="form-label small">Протокол</label>
+                            <div class="np-proto-pick" role="radiogroup" aria-label="Протокол">
+                                <input class="np-proto-pick__input" type="radio" name="proto"
+                                       id="scanPortProtoTcp" value="tcp" checked>
+                                <label class="np-proto-pick__chip np-proto-pick__chip--tcp"
+                                       for="scanPortProtoTcp">TCP</label>
+                                <input class="np-proto-pick__input" type="radio" name="proto"
+                                       id="scanPortProtoUdp" value="udp">
+                                <label class="np-proto-pick__chip np-proto-pick__chip--udp"
+                                       for="scanPortProtoUdp">UDP</label>
+                            </div>
                         </div>
                         <div class="col-6">
                             <label class="form-label small" for="scanPortNumber">Номер порта</label>
@@ -799,7 +805,7 @@
         var scanPortForm = document.getElementById('scanPortForm');
         var scanPortIpEl = document.getElementById('scanPortIp');
         var scanPortNumber = document.getElementById('scanPortNumber');
-        var scanPortProto = document.getElementById('scanPortProto');
+        var scanPortProtoTcp = document.getElementById('scanPortProtoTcp');
 
         document.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-scan-port]');
@@ -807,7 +813,7 @@
             scanPortForm.action = '/ip/' + encodeURIComponent(btn.dataset.scanPort) + '/scan-port';
             if (scanPortIpEl) scanPortIpEl.textContent = btn.dataset.scanPort;
             if (scanPortNumber) { scanPortNumber.value = ''; }
-            if (scanPortProto) { scanPortProto.value = 'tcp'; }
+            if (scanPortProtoTcp) { scanPortProtoTcp.checked = true; }
             scanPortModal.show();
             if (scanPortNumber) setTimeout(function () { scanPortNumber.focus(); }, 250);
         });
