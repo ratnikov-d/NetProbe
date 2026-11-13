@@ -15,20 +15,35 @@
         var rows = rowsOf(tbody);
         var search = document.querySelector('[data-search-for="' + table.id + '"]');
         var counter = document.querySelector('[data-count-for="' + table.id + '"]');
+        // чекбоксы «только ...»: data-filter-for="id" data-filter-key="open" —
+        // строка видна, если значение data-open у неё больше нуля
+        var filters = Array.prototype.slice.call(
+            document.querySelectorAll('[data-filter-for="' + table.id + '"]'));
         var sortKey = null;
         var dir = 1;
 
+        function matchesFilters(tr) {
+            return filters.every(function (box) {
+                if (!box.checked) return true;
+                var key = box.dataset.filterKey;
+                return Number(tr.dataset[key] || 0) > 0;
+            });
+        }
+
         function applySearch() {
-            if (!search) return;
-            var q = search.value.trim().toLowerCase();
+            var q = search ? search.value.trim().toLowerCase() : '';
+            var filtered = filters.some(function (box) { return box.checked; });
             var shown = 0;
             rows.forEach(function (tr) {
-                var ok = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+                var ok = (!q || tr.textContent.toLowerCase().indexOf(q) !== -1) &&
+                    matchesFilters(tr);
                 tr.style.display = ok ? '' : 'none';
                 if (ok) shown += 1;
             });
             if (counter) {
-                counter.textContent = q ? shown + ' из ' + rows.length : rows.length + ' записей';
+                counter.textContent = (q || filtered)
+                    ? shown + ' из ' + rows.length
+                    : rows.length + ' записей';
             }
         }
 
@@ -64,6 +79,9 @@
 
         if (counter) counter.textContent = rows.length + ' записей';
         if (search) search.addEventListener('input', applySearch);
+        filters.forEach(function (box) {
+            box.addEventListener('change', applySearch);
+        });
     }
 
     document.querySelectorAll('table[data-table]').forEach(initTable);

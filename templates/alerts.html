@@ -42,8 +42,8 @@
                                 title="История по адресу">{{ alert['ip'] }}</button>
                     </td>
                     <td>
-                        <span class="badge {% if alert['proto'] == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}"
-                              title="{% if alert['proto'] == 'udp' %}UDP{% else %}TCP{% endif %}">{{ alert['port'] }}</span>
+                        <span class="badge {% if alert['proto'] == 'udp' %}badge-port-udp{% else %}badge-port{% endif %}{% if alert['action'] != 'opened' %} np-port-closed{% endif %}"
+                              title="{% if alert['proto'] == 'udp' %}UDP{% else %}TCP{% endif %}{% if alert['action'] != 'opened' %} · закрыт{% endif %}">{{ alert['port'] }}</span>
                     </td>
                     <td class="nowrap">
                         {% if alert['action'] == 'opened' %}

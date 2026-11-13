@@ -55,10 +55,32 @@
     // --- прокрутка: возвращаемся туда же после отправки формы ---
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+    // Метка «только что запустили проверку». Короткая проверка (один порт)
+    // заканчивается раньше первого опроса прогресса, и таблица не обновлялась.
+    var SCAN_KEY = 'ps.scan.start';
+    var SCAN_TTL = 15 * 60 * 1000;
+
+    function scanJustStarted() {
+        try {
+            var at = Number(sessionStorage.getItem(SCAN_KEY) || 0);
+            if (!at) return false;
+            sessionStorage.removeItem(SCAN_KEY);
+            return Date.now() - at < SCAN_TTL;
+        } catch (err) {
+            return false;
+        }
+    }
+
     document.addEventListener('submit', function (e) {
         var form = e.target;
-        if (form && form.matches && form.matches('form[data-keep-scroll]')) {
+        if (!form || !form.matches) return;
+        if (form.matches('form[data-keep-scroll]')) {
             try { sessionStorage.setItem(SCROLL_KEY, String(window.scrollY)); } catch (err) { /* ignore */ }
+        }
+        // формы запуска проверки адреса: /ip/<ip>/scan и /ip/<ip>/scan-port
+        var action = form.getAttribute('action') || '';
+        if (/\/scan(-port)?$/.test(action)) {
+            try { sessionStorage.setItem(SCAN_KEY, String(Date.now())); } catch (err) { /* ignore */ }
         }
     }, true);
 
@@ -87,6 +109,18 @@
         var stopping = false;
         var currentJob = null;
         var overallPct = 0;
+        // сканирование запустили на предыдущей странице: обновим таблицу,
+        // даже если задание закончилось до первого опроса
+        var pendingScan = scanJustStarted();
+
+        // перечитываем таблицу результатов, сохраняя позицию прокрутки
+        function refreshResults(delay) {
+            if (window.location.pathname !== '/dashboard') return;
+            setTimeout(function () {
+                if (window.keepScrollReload) window.keepScrollReload();
+                else window.location.reload();
+            }, typeof delay === 'number' ? delay : 2000);
+        }
 
         function setText(id, value) {
             var el = document.getElementById(id);
@@ -102,6 +136,15 @@
             fetch('/api/scan/progress')
                 .then(function (r) { return r.json(); })
                 .then(function (p) {
+                    if (pendingScan) {
+                        pendingScan = false;
+                        // задание создаётся до возврата на страницу: если оно уже
+                        // закончилось, ждать нечего — сразу обновляем таблицу
+                        if (!p || !p.log_id || !p.running) {
+                            refreshResults(400);
+                            return;
+                        }
+                    }
                     if (!p || !p.log_id) return;
                     if (currentJob !== p.log_id) {
                         currentJob = p.log_id;
@@ -164,10 +207,7 @@
                             line.classList.remove('is-active');
                         }, 1600);
                         if (window.location.pathname === '/dashboard') {
-                            setTimeout(function () {
-                                if (window.keepScrollReload) window.keepScrollReload();
-                                else window.location.reload();
-                            }, 2000);
+                            refreshResults();
                         }
                     } else {
                         line.classList.remove('is-active');
