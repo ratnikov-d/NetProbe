@@ -222,6 +222,14 @@
                                     </button>
                                 </form>
                             </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <button class="dropdown-item" type="button"
+                                        data-scan-port="{{ data.ip }}"
+                                        title="Проверить один конкретный порт TCP или UDP">
+                                    Проверить порт…
+                                </button>
+                            </li>
                         </ul>
                     </div>
                     {% if current_user.can('hosts') %}
@@ -261,28 +269,78 @@
 </p>
 
 {% if current_user.can('purge') %}
-<details class="np-purge-wrap">
-    <summary>Удалить порт из таблицы</summary>
-    <form class="np-purge" id="portPurgeForm" autocomplete="off">
-        <label class="small text-muted mb-0" for="purgeProto">Протокол</label>
-        <select id="purgeProto" class="form-select form-select-sm np-purge__proto"
-                aria-label="Протокол">
-            <option value="both">TCP и UDP</option>
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-        </select>
-        <input id="purgePort" class="form-control form-control-sm np-purge__input"
-               inputmode="numeric" maxlength="5" placeholder="53"
-               aria-label="Номер порта">
-        <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
-        <div class="form-check form-check-inline mb-0 ms-1">
-            <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
-            <label class="form-check-label small" for="purgeFromSchedules">
-                исключить его из всех расписаний
-            </label>
+<div class="np-purge-wrap">
+    <button class="btn btn-sm btn-outline-secondary np-purge__toggle" type="button"
+            data-bs-toggle="collapse" data-bs-target="#portPurgePanel"
+            aria-expanded="false" aria-controls="portPurgePanel">
+        Удалить порт из таблицы
+    </button>
+    <div class="collapse" id="portPurgePanel">
+        <form class="np-purge" id="portPurgeForm" autocomplete="off">
+            <div class="np-proto-pick" role="radiogroup" aria-label="Протокол">
+                <input class="np-proto-pick__input" type="radio" name="purgeProto"
+                       id="purgeProtoBoth" value="both" checked>
+                <label class="np-proto-pick__chip np-proto-pick__chip--both"
+                       for="purgeProtoBoth">TCP и UDP</label>
+                <input class="np-proto-pick__input" type="radio" name="purgeProto"
+                       id="purgeProtoTcp" value="tcp">
+                <label class="np-proto-pick__chip np-proto-pick__chip--tcp"
+                       for="purgeProtoTcp">TCP</label>
+                <input class="np-proto-pick__input" type="radio" name="purgeProto"
+                       id="purgeProtoUdp" value="udp">
+                <label class="np-proto-pick__chip np-proto-pick__chip--udp"
+                       for="purgeProtoUdp">UDP</label>
+            </div>
+            <input id="purgePort" class="form-control form-control-sm np-purge__input"
+                   inputmode="numeric" maxlength="5" placeholder="53"
+                   aria-label="Номер порта">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Удалить порт</button>
+            <div class="form-check form-check-inline mb-0 ms-1">
+                <input class="form-check-input" type="checkbox" id="purgeFromSchedules">
+                <label class="form-check-label small" for="purgeFromSchedules">
+                    Исключить его из всех расписаний
+                </label>
+            </div>
+        </form>
+    </div>
+</div>
+{% endif %}
+
+{% if current_user.can('scan') %}
+<div class="modal fade" id="scanPortModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="scanPortForm" method="POST" autocomplete="off">
+                <div class="modal-header">
+                    <h5 class="modal-title">Проверить порт</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small-muted mb-3">Адрес: <span class="mono" id="scanPortIp">—</span></p>
+                    <div class="row g-3">
+                        <div class="col-6">
+                            <label class="form-label small" for="scanPortProto">Протокол</label>
+                            <select class="form-select" id="scanPortProto" name="proto">
+                                <option value="tcp">TCP</option>
+                                <option value="udp">UDP</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small" for="scanPortNumber">Номер порта</label>
+                            <input class="form-control" id="scanPortNumber" name="port"
+                                   inputmode="numeric" maxlength="5" placeholder="80" required>
+                        </div>
+                    </div>
+                    <div class="form-text">Будет проверен только этот порт, остальные не сканируются.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Проверить</button>
+                </div>
+            </form>
         </div>
-    </form>
-</details>
+    </div>
+</div>
 {% endif %}
 
 {% if current_user.can('hosts') or current_user.can('scan') %}
@@ -683,7 +741,7 @@
             purgeForm.addEventListener('submit', function (e) {
                 e.preventDefault();
                 var input = document.getElementById('purgePort');
-                var protoEl = document.getElementById('purgeProto');
+                var protoEl = purgeForm.querySelector('input[name="purgeProto"]:checked');
                 var proto = protoEl ? protoEl.value : 'both';
                 var port = parseInt((input.value || '').trim(), 10);
                 if (!port || port < 1 || port > 65535) {
@@ -717,6 +775,25 @@
                 });
             });
         }
+
+        // ------------------------------------------------ проверка одного порта
+        var scanPortModalEl = document.getElementById('scanPortModal');
+        var scanPortModal = scanPortModalEl ? new bootstrap.Modal(scanPortModalEl) : null;
+        var scanPortForm = document.getElementById('scanPortForm');
+        var scanPortIpEl = document.getElementById('scanPortIp');
+        var scanPortNumber = document.getElementById('scanPortNumber');
+        var scanPortProto = document.getElementById('scanPortProto');
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-scan-port]');
+            if (!btn || !scanPortModal || !scanPortForm) return;
+            scanPortForm.action = '/ip/' + encodeURIComponent(btn.dataset.scanPort) + '/scan-port';
+            if (scanPortIpEl) scanPortIpEl.textContent = btn.dataset.scanPort;
+            if (scanPortNumber) { scanPortNumber.value = ''; }
+            if (scanPortProto) { scanPortProto.value = 'tcp'; }
+            scanPortModal.show();
+            if (scanPortNumber) setTimeout(function () { scanPortNumber.focus(); }, 250);
+        });
 
         var createGroupUrl = '{{ url_for("api_group_create") }}';
         var groupModalEl = document.getElementById('groupFormModal');

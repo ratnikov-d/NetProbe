@@ -996,7 +996,79 @@ pre.log {
 }
 
 .np-purge__input { width: 90px; flex: 0 0 auto; }
-.np-purge__proto { width: 120px; flex: 0 0 auto; }
+
+/* выбор протокола чипами: серые, выбранный — цветом протокола */
+.np-proto-pick {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+    flex: 0 0 auto;
+}
+
+.np-proto-pick__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.np-proto-pick__chip {
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 999px;
+    padding: .18rem .65rem;
+    font-size: .78rem;
+    font-weight: 600;
+    line-height: 1.35;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+
+.np-proto-pick__chip:hover { border-color: var(--muted); color: var(--text); }
+
+.np-proto-pick__input:focus-visible + .np-proto-pick__chip {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+.np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
+    color: #0b7a5c;
+    background: rgba(18, 184, 134, .14);
+    border-color: rgba(18, 184, 134, .55);
+}
+
+.np-proto-pick__input:checked + .np-proto-pick__chip--udp {
+    color: #6d28d9;
+    background: rgba(139, 92, 246, .14);
+    border-color: rgba(139, 92, 246, .55);
+}
+
+.np-proto-pick__input:checked + .np-proto-pick__chip--both {
+    color: var(--brand-dark);
+    background: rgba(76, 110, 245, .14);
+    border-color: rgba(76, 110, 245, .5);
+}
+
+[data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
+    color: #7ee2c0;
+    background: rgba(45, 212, 160, .18);
+    border-color: rgba(45, 212, 160, .55);
+}
+
+[data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--udp {
+    color: #c4b5fd;
+    background: rgba(167, 139, 250, .18);
+    border-color: rgba(167, 139, 250, .55);
+}
+
+[data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--both {
+    color: #a9bcff;
+    background: rgba(124, 156, 255, .2);
+    border-color: rgba(124, 156, 255, .55);
+}
 
 /* незаметная панель под таблицей */
 .np-purge-wrap {
@@ -1012,6 +1084,13 @@ pre.log {
 }
 
 .np-purge-wrap > summary:hover { color: var(--text); }
+
+.np-purge__toggle { white-space: nowrap; }
+
+.np-purge__toggle[aria-expanded="true"] {
+    color: var(--text);
+    border-color: var(--muted);
+}
 
 .np-purge-wrap .np-purge {
     margin-top: .5rem;

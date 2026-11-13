@@ -1707,16 +1707,20 @@ def _launch_scan(ips, label, ports_text, ports, udp_text, udp_ports, workers,
 
 
 def start_scan(ip_range, ports_text, workers_text=None, schedule_id=None,
-               udp_ports_text=None):
+               udp_ports_text=None, allow_empty_ports=False):
     start_int, end_int = parse_range(ip_range)
-    ports = parse_ports(ports_text)
+    if allow_empty_ports and not (ports_text or '').strip():
+        ports = []
+    else:
+        ports = parse_ports(ports_text)
     udp_text = (udp_ports_text or '').strip()
     udp_ports = parse_udp_ports(udp_text) if udp_text else []
     workers = parse_workers(workers_text)
 
     ips = [int_to_ip(i) for i in range(start_int, end_int + 1)]
+    text = ports_text if allow_empty_ports else (ports_text or DEFAULT_PORTS_STR)
     return _launch_scan(ips, ip_range or DEFAULT_RANGE,
-                        ports_text or DEFAULT_PORTS_STR, ports, udp_text,
+                        text, ports, udp_text,
                         udp_ports, workers, schedule_id)
 
 
@@ -3043,6 +3047,38 @@ def ip_scan(ip):
     details = f'порты: {ports}'
     details += f' · UDP: {udp_ports}' if udp_ports else ' · UDP не проверяется'
     flash(f'Проверка {ip} запущена ({scope}, задание #{log_id}, {details})',
+          'success')
+    return redirect(request.referrer or url_for('dashboard'))
+
+
+@app.route('/ip/<ip>/scan-port', methods=['POST'])
+@permission_required('scan')
+def ip_scan_port(ip):
+    """Проверить один конкретный порт (TCP или UDP) у адреса."""
+    try:
+        ip_to_int(ip)
+    except ValueError:
+        flash('Некорректный IP', 'danger')
+        return redirect(request.referrer or url_for('dashboard'))
+
+    proto = 'udp' if (request.form.get('proto') or '').strip().lower() == 'udp' else 'tcp'
+    try:
+        port = int((request.form.get('port') or '').strip())
+    except ValueError:
+        port = 0
+    if port < 1 or port > 65535:
+        flash('Введите номер порта от 1 до 65535', 'danger')
+        return redirect(request.referrer or url_for('dashboard'))
+
+    try:
+        log_id = start_scan(f'{ip}-{ip}', '' if proto == 'udp' else str(port),
+                            str(SCAN_WORKERS),
+                            udp_ports_text=str(port) if proto == 'udp' else '',
+                            allow_empty_ports=(proto == 'udp'))
+    except ValueError as e:
+        flash(f'Ошибка: {e}', 'danger')
+        return redirect(request.referrer or url_for('dashboard'))
+    flash(f'Проверка {ip}:{port} ({proto.upper()}) запущена, задание #{log_id}',
           'success')
     return redirect(request.referrer or url_for('dashboard'))
 
