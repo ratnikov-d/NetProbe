@@ -322,7 +322,7 @@
 
 {% if current_user.can('scan') %}
 <div class="modal fade" id="scanPortModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered np-scan-port-dialog">
         <div class="modal-content">
             <form id="scanPortForm" method="POST" autocomplete="off">
                 <div class="modal-header">
@@ -351,14 +351,11 @@
                                id="scanPortNumber" name="ports" inputmode="numeric"
                                maxlength="120" placeholder="53" required
                                aria-label="Номер порта, список или диапазон">
+                        <button class="btn btn-sm btn-primary" type="submit">Проверить</button>
                     </div>
                     <div class="small-muted mt-2">
                         По одному или списком: 53, 123, 1900-1910
                     </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-                    <button type="submit" class="btn btn-primary">Проверить</button>
                 </div>
             </form>
         </div>
