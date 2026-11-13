@@ -3034,6 +3034,18 @@ def ip_scan(ip):
         else:
             ports, udp_ports = ports_for_ip(ip)
             scope = 'обнаруженных портов нет — полная проверка'
+    elif mode == 'all':
+        # порты из расписания + всё, что когда-либо находили у адреса
+        tcp_now, udp_now = discovered_ports(ip)
+        sched_tcp, sched_udp = ports_for_ip(ip)
+        try:
+            tcp = sorted(set(parse_ports(sched_tcp)) | set(tcp_now))
+            udp = sorted(set(parse_udp_ports(sched_udp)) | set(udp_now))
+        except ValueError:
+            tcp, udp = tcp_now, udp_now
+        ports = ','.join(str(p) for p in tcp) or DEFAULT_PORTS_STR
+        udp_ports = ','.join(str(p) for p in udp)
+        scope = f'все порты и найденные: {len(tcp)} TCP, {len(udp)} UDP'
     else:
         ports, udp_ports = ports_for_ip(ip)
         scope = 'полная проверка'

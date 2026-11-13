@@ -222,6 +222,16 @@
                                     </button>
                                 </form>
                             </li>
+                            <li>
+                                <form method="POST" action="{{ url_for('ip_scan', ip=data.ip) }}"
+                                      data-keep-scroll>
+                                    <input type="hidden" name="mode" value="all">
+                                    <button class="dropdown-item" type="submit"
+                                            title="Порты из расписания и всё, что уже находили у этого адреса">
+                                        Все порты и найденные
+                                    </button>
+                                </form>
+                            </li>
                             <li><hr class="dropdown-divider"></li>
                             <li>
                                 <button class="dropdown-item" type="button"
