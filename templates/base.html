@@ -86,7 +86,7 @@
             <span class="scan-chip__range" id="progRange"></span> ·
             <span id="progPct">0%</span> ·
             <span id="progDone">0</span>/<span id="progTotal">0</span> ·
-            новых <span id="progOpened">0</span>
+            новых/закрытых <span id="progOpened">0</span>
         </span>
     </span>
     {% if current_user.can('scan') %}
@@ -110,6 +110,23 @@
             <div class="modal-footer">
                 <a class="btn btn-outline-primary me-auto" id="hostHistoryFull"
                    href="#">Полная статистика</a>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="scanPortsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Порты сканирования <span class="small-muted" id="scanPortsTitle"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <div class="modal-body">
+                <div id="scanPortsBody" class="np-history">Загрузка…</div>
+            </div>
+            <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Закрыть</button>
             </div>
         </div>

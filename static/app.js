@@ -137,7 +137,7 @@
                         // все проверки закончены, задание ещё закрывается
                         setText('progPct', 'обработка');
                     }
-                    setText('progOpened', p.open_found);
+                    setText('progOpened', (p.open_found || 0) + (p.closed_found || 0));
                     var bar = document.getElementById('progBar');
                     if (bar) bar.style.width = overallPct + '%';
 
@@ -227,6 +227,7 @@
             var el = e.target.closest && e.target.closest('[data-port-tip]');
             if (!el) return;
             tip.textContent = el.dataset.portTip;
+            tip.classList.toggle('is-list', el.hasAttribute('data-tip-list'));
             tip.classList.add('is-visible');
             place(e.clientX, e.clientY);
         });
@@ -331,6 +332,79 @@
             var btn = e.target.closest('.ip-link');
             if (!btn || !btn.dataset.ip) return;
             openHistory(btn.dataset.ip);
+        });
+    });
+
+    // --------------------------------------- порты одного сканирования (лог)
+    document.addEventListener('DOMContentLoaded', function () {
+        var modalEl = document.getElementById('scanPortsModal');
+        if (!modalEl || typeof bootstrap === 'undefined') return;
+
+        var modal = new bootstrap.Modal(modalEl);
+        var title = document.getElementById('scanPortsTitle');
+        var body = document.getElementById('scanPortsBody');
+
+        function renderPorts(data) {
+            if (!body) return;
+            if (!data.details_saved) {
+                body.innerHTML = '<div class="text-muted small">' +
+                    'Данные по этому сканированию не сохранялись.</div>';
+                return;
+            }
+            if (!data.ports || !data.ports.length) {
+                body.innerHTML = '<div class="text-muted small">' +
+                    'В этом сканировании новые порты не появлялись и закрытых нет.</div>';
+                return;
+            }
+            var html = '<div class="small-muted mb-2">Открыто: ' + data.opened +
+                ' · закрыто: ' + data.closed + ' · всего: ' + data.total + '</div>';
+            html += '<div class="table-responsive"><table class="table table-sm mb-0">' +
+                '<thead><tr><th>Время</th><th>Адрес</th><th>Порт</th>' +
+                '<th>Протокол</th><th>Состояние</th></tr></thead><tbody>';
+            data.ports.forEach(function (p) {
+                var udp = p.proto === 'udp';
+                var closed = p.action !== 'opened';
+                var cls = udp ? 'badge-port-udp' : 'badge-port';
+                if (closed) cls += ' np-port-closed';
+                html += '<tr>' +
+                    '<td class="small-muted text-nowrap">' + window.npFmtDt(p.timestamp) + '</td>' +
+                    '<td class="mono">' + p.ip + '</td>' +
+                    '<td><span class="badge ' + cls + '">' + p.port + '</span></td>' +
+                    '<td>' + (udp ? 'UDP' : 'TCP') + '</td>' +
+                    '<td>' + (closed
+                        ? '<span class="badge bg-secondary">закрыт</span>'
+                        : '<span class="badge bg-success">открыт</span>') + '</td>' +
+                    '</tr>';
+            });
+            html += '</tbody></table></div>';
+            body.innerHTML = html;
+        }
+
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.np-log-count');
+            if (!btn || !btn.dataset.logId) return;
+            var id = btn.dataset.logId;
+            if (title) title.textContent = '#' + id;
+            if (body) body.innerHTML = '<div class="text-muted small">Загрузка…</div>';
+            modal.show();
+            fetch('/api/logs/' + encodeURIComponent(id) + '/ports')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.error) {
+                        if (body) body.innerHTML =
+                            '<div class="text-danger small">' + data.error + '</div>';
+                        return;
+                    }
+                    if (title) {
+                        title.textContent = '#' + id + ' · ' + (data.ip_range || '') +
+                            ' · ' + window.npFmtDt(data.start_time);
+                    }
+                    renderPorts(data);
+                })
+                .catch(function () {
+                    if (body) body.innerHTML =
+                        '<div class="text-danger small">Нет связи с сервером</div>';
+                });
         });
     });
 })();

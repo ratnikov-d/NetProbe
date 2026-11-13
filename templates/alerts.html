@@ -25,11 +25,13 @@
                     <th data-sort="ip">IP-адрес <span class="sort-mark"></span></th>
                     <th data-sort="port">Порт <span class="sort-mark"></span></th>
                     <th>Событие</th>
+                    <th>Оповещение</th>
                     <th>Сообщение</th>
                 </tr>
             </thead>
             <tbody>
                 {% for alert in alerts %}
+                {% set sent = deliveries.get(alert['id']) %}
                 <tr data-row
                     data-ts="{{ alert['timestamp']|dt }}"
                     data-ip="{{ alert['ip'] }}"
@@ -49,11 +51,31 @@
                         <span class="badge bg-secondary">{{ alert['action'] }}</span>
                         {% endif %}
                     </td>
+                    <td class="nowrap">
+                        {% if sent and sent['ok'] %}
+                        <span class="badge np-alert-badge np-alert-badge--ok"
+                              data-port-tip="{{ sent['tooltip'] }}" data-tip-list="1"
+                              title="Каналы оповещения">Отправлено: {{ sent['ok'] }}</span>
+                        {% if sent['error'] %}
+                        <span class="badge np-alert-badge np-alert-badge--error"
+                              data-port-tip="{{ sent['tooltip'] }}" data-tip-list="1"
+                              title="Каналы с ошибкой">ошибок: {{ sent['error'] }}</span>
+                        {% endif %}
+                        {% elif sent and sent['error'] %}
+                        <span class="badge np-alert-badge np-alert-badge--error"
+                              data-port-tip="{{ sent['tooltip'] }}" data-tip-list="1"
+                              title="Ошибки отправки">ошибок: {{ sent['error'] }}</span>
+                        {% else %}
+                        <span class="badge np-alert-badge np-alert-badge--none"
+                              data-port-tip="Оповещение по этому событию не отправлялось"
+                              data-tip-list="1">Не отправлялось</span>
+                        {% endif %}
+                    </td>
                     <td>{{ alert['message'] }}</td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" class="empty-state">Событий пока нет.</td>
+                    <td colspan="6" class="empty-state">Событий пока нет.</td>
                 </tr>
                 {% endfor %}
             </tbody>

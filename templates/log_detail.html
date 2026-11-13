@@ -32,7 +32,10 @@
             <div class="col-md-3"><span class="text-muted">Начало:</span> {{ job['start_time']|dt }}</div>
             <div class="col-md-3"><span class="text-muted">Конец:</span> {{ job['end_time']|dt }}</div>
             <div class="col-md-2"><span class="text-muted">Статус:</span> {{ job['status']|status_ru }}</div>
-            <div class="col-md-2"><span class="text-muted">Новых портов:</span> {{ job['open_found'] or 0 }}</div>
+            <div class="col-md-2"><span class="text-muted">Новые/закрытые порты:</span>
+                <button type="button" class="np-log-count" data-log-id="{{ job['id'] }}"
+                        title="Открыто: {{ job['open_found'] or 0 }} · закрыто: {{ job['closed_found'] or 0 }}. Нажмите, чтобы посмотреть список">{{ (job['open_found'] or 0) + (job['closed_found'] or 0) }}</button>
+            </div>
             <div class="col-md-2"><span class="text-muted">Источник:</span>
                 {% if job['schedule_id'] %}расписание #{{ job['schedule_id'] }}{% else %}вручную{% endif %}
             </div>
@@ -72,6 +75,8 @@
                             <span class="badge bg-secondary">закрыт</span>
                             {% elif e['level'] == 'warning' %}
                             <span class="badge bg-warning text-dark">внимание</span>
+                            {% elif e['level'] == 'notify' %}
+                            <span class="badge np-alert-badge np-alert-badge--ok">алерт</span>
                             {% elif e['level'] == 'error' %}
                             <span class="badge bg-danger">ошибка</span>
                             {% else %}
@@ -135,9 +140,11 @@
                     var cls = e.level === 'opened' ? 'bg-success' :
                               e.level === 'closed' ? 'bg-secondary' :
                               e.level === 'warning' ? 'bg-warning text-dark' :
+                              e.level === 'notify' ? 'np-alert-badge np-alert-badge--ok' :
                               e.level === 'error' ? 'bg-danger' : 'bg-light text-dark';
+                    var label = e.level === 'notify' ? 'алерт' : e.level;
                     tr.innerHTML = '<td class="text-muted small text-nowrap">' + window.npFmtDt(e.timestamp) +
-                        '</td><td><span class="badge ' + cls + '">' + e.level +
+                        '</td><td><span class="badge ' + cls + '">' + label +
                         '</span></td><td class="small">' + e.message + '</td>';
                     body.appendChild(tr);
                 });

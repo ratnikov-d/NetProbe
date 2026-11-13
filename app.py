@@ -291,6 +291,32 @@ def init_db():
         )
     ''')
     cur.execute('''
+        CREATE TABLE IF NOT EXISTS scan_port_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            log_id INTEGER NOT NULL,
+            ip TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            proto TEXT DEFAULT 'tcp',
+            action TEXT NOT NULL,
+            timestamp TEXT NOT NULL
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS alert_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER,
+            log_id INTEGER,
+            ip TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            proto TEXT DEFAULT 'tcp',
+            event_kind TEXT,
+            channel TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail TEXT,
+            timestamp TEXT NOT NULL
+        )
+    ''')
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS paused_ips (
             ip TEXT PRIMARY KEY,
             paused_at TEXT NOT NULL,
@@ -324,10 +350,18 @@ def init_db():
         )
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_events_log ON scan_events(log_id, id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_scan_ports_log '
+                'ON scan_port_events(log_id, id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_deliveries_alert '
+                'ON alert_deliveries(alert_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_deliveries_log '
+                'ON alert_deliveries(log_id)')
 
     ensure_column(conn, 'scan_logs', 'total', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'done', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'open_found', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'closed_found', 'INTEGER DEFAULT 0')
+    ensure_column(conn, 'scan_logs', 'details_saved', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'workers', 'INTEGER DEFAULT 0')
     ensure_column(conn, 'scan_logs', 'schedule_id', 'INTEGER')
     ensure_column(conn, 'scan_logs', 'udp_total', 'INTEGER DEFAULT 0')
@@ -825,6 +859,97 @@ CHANNEL_SENDERS = {
     'email': send_email,
 }
 
+# подписи каналов для журнала и подсказок в интерфейсе
+CHANNEL_LABELS = {
+    'telegram': 'Telegram',
+    'max': 'MAX',
+    'email': 'E-mail',
+    'zabbix': 'Zabbix',
+    'syslog': 'Syslog',
+}
+
+
+def log_port_event(conn, log_id, ip, port, proto, action, when=None):
+    """Сохраняет факт обнаружения/закрытия порта в рамках задания."""
+    if not log_id:
+        return
+    conn.execute('INSERT INTO scan_port_events '
+                 '(log_id, ip, port, proto, action, timestamp) '
+                 'VALUES (?, ?, ?, ?, ?, ?)',
+                 (log_id, ip, port, 'udp' if proto == 'udp' else 'tcp', action,
+                  when or datetime.now().isoformat(timespec='seconds')))
+
+
+def save_alert_deliveries(log_id, alert_id, ip, port, proto, kind, results):
+    """Пишет в БД фактическую отправку алерта по каналам.
+
+    results — список (channel, status, detail), где status 'ok' или 'error'.
+    Ошибки записи не должны ломать рассылку, поэтому всё в try/except.
+    """
+    if not results:
+        return
+    stamp = datetime.now().isoformat(timespec='seconds')
+    rows = [(alert_id, log_id, ip, port, 'udp' if proto == 'udp' else 'tcp',
+             kind, channel, status, detail, stamp)
+            for channel, status, detail in results]
+    conn = None
+    try:
+        conn = db()
+        conn.executemany(
+            'INSERT INTO alert_deliveries (alert_id, log_id, ip, port, proto, '
+            'event_kind, channel, status, detail, timestamp) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+        if log_id:
+            parts = []
+            for channel, status, detail in results:
+                text = (f'{CHANNEL_LABELS.get(channel, channel)} — '
+                        f'{"отправлено" if status == "ok" else "ошибка"}')
+                if detail and status != 'ok':
+                    text += f': {detail}'
+                parts.append(text)
+            action_ru = 'открытие' if kind == 'opened' else 'закрытие'
+            conn.execute(
+                'INSERT INTO scan_events (log_id, timestamp, level, message) '
+                'VALUES (?, ?, ?, ?)',
+                (log_id, stamp, 'notify',
+                 f'Алерт {ip}:{port} ({action_ru}) — ' + '; '.join(parts)))
+        conn.commit()
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def notify_event(kind, ip, port, proto='tcp', log_id=None, alert_id=None):
+    """Оповещение о событии порта: у каждого канала свои типы и язык.
+
+    log_id/alert_id нужны, чтобы сохранить факт отправки в журнале задания
+    и показать его на странице «События»."""
+    cfg = get_settings()
+    outbox = []
+    for name in CHANNEL_SENDERS:
+        if cfg.get(f'{name}_enabled') != '1':
+            continue
+        if cfg.get(f'{name}_notify_{kind}') != '1':
+            continue
+        outbox.append((name, notify_text(kind, ip, port, proto, cfg, name)))
+    if not outbox:
+        return
+
+    def deliver():
+        results = []
+        for name, message in outbox:
+            try:
+                CHANNEL_SENDERS[name](get_settings(), message)
+            except Exception as e:  # noqa: BLE001
+                results.append((name, 'error', str(e)))
+            else:
+                results.append((name, 'ok', ''))
+        save_alert_deliveries(log_id, alert_id, ip, port, proto, kind, results)
+
+    threading.Thread(target=deliver, daemon=True).start()
+
 
 def notify(message, only=None):
     """Рассылает сообщение во включённые каналы. Возвращает список ошибок."""
@@ -877,30 +1002,6 @@ def notify_text(kind, ip, port, proto='tcp', cfg=None, channel=None):
     lang = notify_lang(cfg, channel)
     proto = 'udp' if proto == 'udp' else 'tcp'
     return NOTIFY_TEXT[lang][kind][proto].format(ip=ip, port=port)
-
-
-def notify_event(kind, ip, port, proto='tcp'):
-    """Оповещение о событии порта: у каждого канала свои типы и язык."""
-    cfg = get_settings()
-    outbox = []
-    for name in CHANNEL_SENDERS:
-        if cfg.get(f'{name}_enabled') != '1':
-            continue
-        if cfg.get(f'{name}_notify_{kind}') != '1':
-            continue
-        outbox.append((name, notify_text(kind, ip, port, proto, cfg, name)))
-    if not outbox:
-        return
-
-    def deliver():
-        for name, message in outbox:
-            try:
-                CHANNEL_SENDERS[name](get_settings(), message)
-            except Exception:  # noqa: BLE001
-                pass
-
-    threading.Thread(target=deliver, daemon=True).start()
-
 
 
 # ------------------------------------------------------------------ сканирование
@@ -1089,6 +1190,7 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
     now = datetime.now().isoformat(timespec='seconds')
     suppress = suppress or set()
     opened = 0
+    closed = 0
     changed = set()
 
     for ip, port, is_open, _err in batch:
@@ -1104,11 +1206,13 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                              (ip, port, now, now))
                 # запись в историю делаем всегда, чтобы по адресу была видна
                 # вся история, начиная с первого сканирования
-                conn.execute('INSERT INTO alerts '
-                             '(ip, port, action, timestamp, message, proto) '
-                             "VALUES (?, ?, 'opened', ?, ?, 'udp')",
-                             (ip, port, now,
-                              f'Новый открытый UDP-порт {port} на {ip}'))
+                cur = conn.execute('INSERT INTO alerts '
+                                   '(ip, port, action, timestamp, message, proto) '
+                                   "VALUES (?, ?, 'opened', ?, ?, 'udp')",
+                                   (ip, port, now,
+                                    f'Новый открытый UDP-порт {port} на {ip}'))
+                alert_id = cur.lastrowid
+                log_port_event(conn, log_id, ip, port, 'udp', 'opened', now)
                 if ip in suppress:
                     # первый скан адреса: фиксируем порт, но уведомление не шлём
                     add_event(conn, log_id, 'info',
@@ -1116,7 +1220,8 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
                 else:
                     add_event(conn, log_id, 'opened',
                               f'НОВЫЙ ОТКРЫТЫЙ UDP-ПОРТ {ip}:{port}')
-                    notify_event('opened', ip, port, 'udp')
+                    notify_event('opened', ip, port, 'udp', log_id=log_id,
+                                 alert_id=alert_id)
                 opened += 1
                 changed.add(ip)
         elif row and not count_miss:
@@ -1127,16 +1232,25 @@ def apply_udp_batch(conn, log_id, batch, suppress=None, count_miss=True):
             if misses >= CLOSE_CONFIRM:
                 conn.execute('DELETE FROM port_state_udp WHERE ip = ? AND port = ?',
                              (ip, port))
-                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message, proto) '
-                             "VALUES (?, ?, 'closed', ?, ?, 'udp')",
-                             (ip, port, now, f'UDP-порт {port} закрыт на {ip}'))
+                cur = conn.execute('INSERT INTO alerts '
+                                   '(ip, port, action, timestamp, message, proto) '
+                                   "VALUES (?, ?, 'closed', ?, ?, 'udp')",
+                                   (ip, port, now,
+                                    f'UDP-порт {port} закрыт на {ip}'))
+                alert_id = cur.lastrowid
+                log_port_event(conn, log_id, ip, port, 'udp', 'closed', now)
                 add_event(conn, log_id, 'closed',
                           f'UDP-порт закрыт {ip}:{port} — убран из таблицы')
-                notify_event('closed', ip, port, 'udp')
+                notify_event('closed', ip, port, 'udp', log_id=log_id,
+                             alert_id=alert_id)
+                closed += 1
             else:
                 conn.execute('UPDATE port_state_udp SET misses = ? '
                              'WHERE ip = ? AND port = ?', (misses, ip, port))
 
+    if closed:
+        conn.execute('UPDATE scan_logs SET closed_found = '
+                     'COALESCE(closed_found, 0) + ? WHERE id = ?', (closed, log_id))
     for ip in changed:
         conn.execute('UPDATE hosts SET updated_at = ? WHERE ip = ?', (now, ip))
     return opened
@@ -1257,6 +1371,7 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                      (ip, now, now))
 
     opened = 0
+    closed = 0
     changed = set()
     for item in batch:
         ip, port, is_open, error = item[:4]
@@ -1276,16 +1391,20 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                              'VALUES (?, ?, ?, ?)', (ip, port, now, now))
                 # запись в историю делаем всегда, чтобы по адресу была видна
                 # вся история, начиная с первого сканирования
-                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message, proto) '
-                             "VALUES (?, ?, 'opened', ?, ?, 'tcp')",
-                             (ip, port, now, f'Новый открытый порт {port} на {ip}'))
+                cur = conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message, proto) '
+                                   "VALUES (?, ?, 'opened', ?, ?, 'tcp')",
+                                   (ip, port, now,
+                                    f'Новый открытый порт {port} на {ip}'))
+                alert_id = cur.lastrowid
+                log_port_event(conn, log_id, ip, port, 'tcp', 'opened', now)
                 if ip in suppress:
                     # первый скан адреса: фиксируем порт, но уведомление не шлём
                     add_event(conn, log_id, 'info',
                               f'первый скан {ip}:{port} — без алерта')
                 else:
                     add_event(conn, log_id, 'opened', f'НОВЫЙ ОТКРЫТЫЙ ПОРТ {ip}:{port}')
-                    notify_event('opened', ip, port, 'tcp')
+                    notify_event('opened', ip, port, 'tcp', log_id=log_id,
+                                 alert_id=alert_id)
                 opened += 1
                 changed.add(ip)
         elif row and not count_miss:
@@ -1296,12 +1415,16 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
             if misses >= CLOSE_CONFIRM:
                 conn.execute('DELETE FROM port_state WHERE ip = ? AND port = ?',
                              (ip, port))
-                conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
-                             "VALUES (?, ?, 'closed', ?, ?)",
-                             (ip, port, now, f'Порт {port} закрыт на {ip}'))
+                cur = conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
+                                   "VALUES (?, ?, 'closed', ?, ?)",
+                                   (ip, port, now, f'Порт {port} закрыт на {ip}'))
+                alert_id = cur.lastrowid
+                log_port_event(conn, log_id, ip, port, 'tcp', 'closed', now)
                 add_event(conn, log_id, 'closed',
                           f'порт закрыт {ip}:{port} — убран из таблицы')
-                notify_event('closed', ip, port, 'tcp')
+                notify_event('closed', ip, port, 'tcp', log_id=log_id,
+                             alert_id=alert_id)
+                closed += 1
                 changed.add(ip)
             else:
                 # одиночный таймаут не считается закрытием порта
@@ -1311,6 +1434,9 @@ def apply_batch(conn, log_id, batch, suppress=None, count_miss=True):
                           f'{ip}:{port} не ответил ({misses}/{CLOSE_CONFIRM}) — '
                           f'оставляем в таблице')
 
+    if closed:
+        conn.execute('UPDATE scan_logs SET closed_found = '
+                     'COALESCE(closed_found, 0) + ? WHERE id = ?', (closed, log_id))
     for ip in changed:
         conn.execute('UPDATE hosts SET updated_at = ? WHERE ip = ?', (now, ip))
     return opened
@@ -1341,16 +1467,23 @@ def close_ports(conn, log_id, pairs):
     """Закрывает TCP-порты сразу: убирает из таблицы и пишет событие."""
     now = datetime.now().isoformat(timespec='seconds')
     changed = set()
+    closed = 0
     for ip, port in pairs:
         cur = conn.execute('DELETE FROM port_state WHERE ip = ? AND port = ?',
                            (ip, port))
         if not cur.rowcount:
             continue
-        conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
-                     "VALUES (?, ?, 'closed', ?, ?)",
-                     (ip, port, now, f'Порт {port} закрыт на {ip}'))
+        cur = conn.execute('INSERT INTO alerts (ip, port, action, timestamp, message) '
+                           "VALUES (?, ?, 'closed', ?, ?)",
+                           (ip, port, now, f'Порт {port} закрыт на {ip}'))
+        alert_id = cur.lastrowid
+        log_port_event(conn, log_id, ip, port, 'tcp', 'closed', now)
         changed.add(ip)
-        notify_event('closed', ip, port, 'tcp')
+        closed += 1
+        notify_event('closed', ip, port, 'tcp', log_id=log_id, alert_id=alert_id)
+    if closed:
+        conn.execute('UPDATE scan_logs SET closed_found = '
+                     'COALESCE(closed_found, 0) + ? WHERE id = ?', (closed, log_id))
     for ip in changed:
         conn.execute('UPDATE hosts SET updated_at = ? WHERE ip = ?', (now, ip))
     conn.commit()
@@ -1589,6 +1722,7 @@ def scan_worker(ips, tcp_ports, udp_ports, log_id, workers):
 
     conn = db()
     conn.execute('UPDATE scan_logs SET total = ?, done = 0, open_found = 0, '
+                 'closed_found = 0, details_saved = 1, '
                  'udp_total = 0, udp_done = 0, udp_done_all = 0, udp_phase = \'\', '
                  'verify_total = 0, verify_done = 0, '
                  "status = 'running', workers = ? WHERE id = ?",
@@ -1683,8 +1817,8 @@ def _launch_scan(ips, label, ports_text, ports, udp_text, udp_ports, workers,
     conn = db()
     cur = conn.execute(
         'INSERT INTO scan_logs (ip_range, ports, udp_ports, start_time, status, '
-        'total, workers, schedule_id, udp_planned) '
-        'VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)',
+        'total, workers, schedule_id, udp_planned, details_saved) '
+        'VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, 1)',
         (label, ports_text, udp_text,
          datetime.now().isoformat(timespec='seconds'), 'running', workers,
          schedule_id, len(active) * len(udp_ports) * 2))
@@ -1781,7 +1915,17 @@ def delete_range_results(ip_range):
             deleted_events += conn.execute(
                 f'DELETE FROM scan_events WHERE log_id IN ({placeholders})',
                 log_ids).rowcount
+            conn.execute(
+                f'DELETE FROM scan_port_events WHERE log_id IN ({placeholders})',
+                log_ids)
+            conn.execute(
+                f'DELETE FROM alert_deliveries WHERE log_id IN ({placeholders})',
+                log_ids)
             conn.execute(f'DELETE FROM scan_logs WHERE id IN ({placeholders})', log_ids)
+        for chunk in chunks(ips, 500):
+            placeholders = ','.join('?' * len(chunk))
+            conn.execute(
+                f'DELETE FROM alert_deliveries WHERE ip IN ({placeholders})', chunk)
 
         deleted_schedules = conn.execute(
             'DELETE FROM schedules WHERE ip_range = ?', (ip_range,)).rowcount
@@ -2462,6 +2606,18 @@ def schedule_clear_history(sid):
             'DELETE FROM scan_events WHERE log_id IN '
             '(SELECT id FROM scan_logs WHERE schedule_id = ? OR ip_range = ?)',
             (sid, row['ip_range']))
+        conn.execute(
+            'DELETE FROM scan_port_events WHERE log_id IN '
+            '(SELECT id FROM scan_logs WHERE schedule_id = ? OR ip_range = ?)',
+            (sid, row['ip_range']))
+        conn.execute(
+            'DELETE FROM alert_deliveries WHERE log_id IN '
+            '(SELECT id FROM scan_logs WHERE schedule_id = ? OR ip_range = ?)',
+            (sid, row['ip_range']))
+        for chunk in chunks(keep, 500):
+            placeholders = ','.join('?' * len(chunk))
+            conn.execute(
+                f'DELETE FROM alert_deliveries WHERE ip IN ({placeholders})', chunk)
         conn.execute('DELETE FROM scan_logs WHERE schedule_id = ? OR ip_range = ?',
                      (sid, row['ip_range']))
         conn.commit()
@@ -2642,13 +2798,75 @@ def log_detail(log_id):
                            title=f'Задание #{log_id}')
 
 
+def alert_deliveries_map(conn, alert_ids):
+    """Отправки оповещений по id событий: каналы, статусы, готовая подсказка."""
+    result = {}
+    ids = [int(i) for i in alert_ids if i is not None]
+    deliveries = []
+    for chunk in chunks(ids, 500):
+        placeholders = ','.join('?' * len(chunk))
+        deliveries.extend(conn.execute(
+            f'SELECT * FROM alert_deliveries WHERE alert_id IN ({placeholders}) '
+            'ORDER BY id', chunk).fetchall())
+    for d in deliveries:
+        channel = d['channel']
+        ok = d['status'] == 'ok'
+        line = (f'{CHANNEL_LABELS.get(channel, channel)} — '
+                f'{"отправлено" if ok else "ошибка"}')
+        if d['detail'] and not ok:
+            line += f': {d["detail"]}'
+        entry = result.setdefault(d['alert_id'], {
+            'items': [], 'ok': 0, 'error': 0, 'tooltip': ''})
+        entry['items'].append({
+            'channel': channel,
+            'label': CHANNEL_LABELS.get(channel, channel),
+            'status': d['status'],
+            'status_ru': 'отправлено' if ok else 'ошибка',
+            'detail': d['detail'] or '',
+            'timestamp': d['timestamp'],
+        })
+        entry['ok' if ok else 'error'] += 1
+        entry['tooltip'] = (entry['tooltip'] + '\n' + line).strip('\n')
+    return result
+
+
 @app.route('/alerts')
 @login_required
 def alerts():
     conn = db()
     rows = conn.execute('SELECT * FROM alerts ORDER BY id DESC LIMIT 200').fetchall()
+    deliveries = alert_deliveries_map(conn, [r['id'] for r in rows])
     conn.close()
-    return render_template('alerts.html', alerts=rows, title='События')
+    return render_template('alerts.html', alerts=rows, deliveries=deliveries,
+                           title='События')
+
+
+@app.route('/api/logs/<int:log_id>/ports')
+@login_required
+def api_log_ports(log_id):
+    """Порты, обнаруженные и закрытые в рамках одного сканирования."""
+    conn = db()
+    job = conn.execute('SELECT * FROM scan_logs WHERE id = ?', (log_id,)).fetchone()
+    if not job:
+        conn.close()
+        return jsonify({'error': 'Задание не найдено'}), 404
+    rows = conn.execute(
+        'SELECT ip, port, proto, action, timestamp FROM scan_port_events '
+        'WHERE log_id = ? ORDER BY id LIMIT 5000', (log_id,)).fetchall()
+    conn.close()
+    items = [dict(r) for r in rows]
+    return jsonify({
+        'log_id': job['id'],
+        'ip_range': job['ip_range'],
+        'status': job['status'],
+        'start_time': job['start_time'],
+        'end_time': job['end_time'],
+        'details_saved': bool(job['details_saved']),
+        'total': len(items),
+        'opened': sum(1 for r in items if r['action'] == 'opened'),
+        'closed': sum(1 for r in items if r['action'] == 'closed'),
+        'ports': items,
+    })
 
 
 # ------------------------------------------------------------------- настройки
@@ -3616,6 +3834,7 @@ def api_progress():
         'total': total,
         'done': done,
         'open_found': job['open_found'] or 0,
+        'closed_found': job['closed_found'] or 0,
         'percent': percent,
         'start_time': job['start_time'],
         'end_time': job['end_time'],

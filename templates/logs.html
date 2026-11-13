@@ -27,7 +27,7 @@
                     <th data-sort="ports">Порты <span class="sort-mark"></span></th>
                     <th data-sort="status">Статус <span class="sort-mark"></span></th>
                     <th data-sort="progress" style="min-width: 120px;">Прогресс <span class="sort-mark"></span></th>
-                    <th data-sort="open">Новых портов <span class="sort-mark"></span></th>
+                    <th data-sort="open">Новые/закрытые порты <span class="sort-mark"></span></th>
                     <th data-sort="start">Начало <span class="sort-mark"></span></th>
                     <th data-sort="end">Конец <span class="sort-mark"></span></th>
                     <th class="text-end">Действия</th>
@@ -38,13 +38,16 @@
                 {% set total = job['total'] or 0 %}
                 {% set done = job['done'] or 0 %}
                 {% set op = overall_progress(job) %}
+                {% set opened = job['open_found'] or 0 %}
+                {% set closed = job['closed_found'] or 0 %}
+                {% set changed_total = opened + closed %}
                 <tr data-row
                     data-log-id="{{ job['id'] }}"
                     data-range="{{ job['ip_range'] }}"
                     data-ports="{{ job['ports'] }}"
                     data-status="{{ job['status'] }}"
                     data-progress="{{ '%.1f'|format(op.percent) }}"
-                    data-open="{{ job['open_found'] or 0 }}"
+                    data-open="{{ changed_total }}"
                     data-start="{{ job['start_time'] or '' }}"
                     data-end="{{ job['end_time'] or '' }}">
                     <td>
@@ -85,7 +88,10 @@
                             {% endif %}
                         </span>
                     </td>
-                    <td class="nowrap">{{ job['open_found'] or 0 }}</td>
+                    <td class="nowrap">
+                        <button type="button" class="np-log-count" data-log-id="{{ job['id'] }}"
+                                title="Открыто: {{ opened }} · закрыто: {{ closed }}. Нажмите, чтобы посмотреть порты этого сканирования">{{ changed_total }}</button>
+                    </td>
                     <td class="small-muted nowrap">{{ job['start_time']|dt }}</td>
                     <td class="small-muted nowrap">{{ job['end_time']|dt }}</td>
                     <td class="text-end nowrap">

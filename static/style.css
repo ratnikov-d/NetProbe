@@ -364,6 +364,63 @@ th[data-sort]:hover { color: var(--text); }
 
 .badge { font-weight: 600; border-radius: 999px; padding: .38em .7em; font-size: .74rem; }
 
+/* плашка отправки оповещения на странице «События» */
+.np-alert-badge {
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.np-alert-badge--ok {
+    background: rgba(18, 184, 134, .14);
+    color: #0b7a5c;
+    border-color: rgba(18, 184, 134, .38);
+}
+
+.np-alert-badge--error {
+    background: rgba(224, 49, 49, .14);
+    color: #b02525;
+    border-color: rgba(224, 49, 49, .38);
+}
+
+.np-alert-badge--none {
+    background: var(--surface-2);
+    color: var(--muted);
+    border-color: var(--line);
+}
+
+[data-theme="dark"] .np-alert-badge--ok {
+    background: rgba(45, 212, 160, .16);
+    color: #7dffb2;
+    border-color: rgba(45, 212, 160, .40);
+}
+
+[data-theme="dark"] .np-alert-badge--error {
+    background: rgba(248, 113, 113, .16);
+    color: #ffb4b4;
+    border-color: rgba(248, 113, 113, .40);
+}
+
+[data-theme="dark"] .np-alert-badge--none {
+    background: var(--surface-2);
+    color: var(--muted);
+    border-color: var(--line);
+}
+
+/* число новых/закрытых портов в логе: открывает список портов задания */
+.np-log-count {
+    border: 0;
+    background: none;
+    padding: 0;
+    font-weight: 700;
+    color: var(--brand);
+    cursor: pointer;
+}
+
+.np-log-count:hover { text-decoration: underline; }
+
 .badge-port {
     background: rgba(18, 184, 134, .14);
     color: #0b7a5c;
@@ -497,6 +554,12 @@ th[data-sort]:hover { color: var(--text); }
 }
 
 .floating-tip.is-visible { opacity: 1; transform: none; }
+
+/* многострочная подсказка: список каналов оповещения */
+.floating-tip.is-list {
+    white-space: pre-line;
+    max-width: 320px;
+}
 
 /* подсказка-вопросик рядом с заголовком поля */
 .hint {
