@@ -244,6 +244,17 @@
 
     // ------------------------------------------------- история по адресу
     document.addEventListener('DOMContentLoaded', function () {
+        // меню «Проверить» в таблице: fixed-позиционирование, иначе его режет
+        // прокручиваемый контейнер таблицы
+        if (typeof bootstrap !== 'undefined' && bootstrap.Dropdown) {
+            document.querySelectorAll('[data-np-fixed-menu] .dropdown-toggle')
+                .forEach(function (btn) {
+                    bootstrap.Dropdown.getOrCreateInstance(btn, {
+                        popperConfig: {strategy: 'fixed'}
+                    });
+                });
+        }
+
         var modalEl = document.getElementById('hostHistoryModal');
         if (!modalEl || typeof bootstrap === 'undefined') return;
 

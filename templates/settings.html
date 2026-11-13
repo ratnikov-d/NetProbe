@@ -10,45 +10,44 @@
 {% set settings_tab = 'notifications' %}
 {% include "_settings_tabs.html" %}
 
-<form method="POST" action="{{ url_for('settings') }}">
-    <div class="card mb-3">
-        <div class="card-header">Оповещения о портах</div>
-        <div class="card-body">
-            <div class="row g-3 align-items-end">
-                <div class="col-md-4">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch"
-                               id="notify_opened_enabled" name="notify_opened_enabled"
-                               {% if cfg.notify_opened_enabled == '1' %}checked{% endif %}>
-                        <label class="form-check-label" for="notify_opened_enabled">
-                            Об открытии нового порта
-                        </label>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" role="switch"
-                               id="notify_closed_enabled" name="notify_closed_enabled"
-                               {% if cfg.notify_closed_enabled == '1' %}checked{% endif %}>
-                        <label class="form-check-label" for="notify_closed_enabled">
-                            О закрытии порта
-                        </label>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label" for="notify_lang">Язык сообщений</label>
-                    <select class="form-select" id="notify_lang" name="notify_lang">
-                        <option value="ru" {% if cfg.notify_lang != 'en' %}selected{% endif %}>Русский</option>
-                        <option value="en" {% if cfg.notify_lang == 'en' %}selected{% endif %}>English</option>
-                    </select>
-                </div>
-            </div>
-            <div class="small-muted mt-3">
-                Пример сообщения: <span id="notifyPreviewText">—</span>
+{% macro notify_events(ch) %}
+<div class="channel__events">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       id="{{ ch }}_notify_opened" name="{{ ch }}_notify_opened"
+                       {% if cfg[ch ~ '_notify_opened'] == '1' %}checked{% endif %}>
+                <label class="form-check-label" for="{{ ch }}_notify_opened">
+                    Об открытии нового порта
+                </label>
             </div>
         </div>
+        <div class="col-md-4">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       id="{{ ch }}_notify_closed" name="{{ ch }}_notify_closed"
+                       {% if cfg[ch ~ '_notify_closed'] == '1' %}checked{% endif %}>
+                <label class="form-check-label" for="{{ ch }}_notify_closed">
+                    О закрытии порта
+                </label>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="{{ ch }}_lang">Язык сообщений</label>
+            <select class="form-select" id="{{ ch }}_lang" name="{{ ch }}_lang">
+                <option value="ru" {% if cfg[ch ~ '_lang'] != 'en' %}selected{% endif %}>Русский</option>
+                <option value="en" {% if cfg[ch ~ '_lang'] == 'en' %}selected{% endif %}>English</option>
+            </select>
+        </div>
     </div>
+    <div class="small-muted mt-2">
+        Пример: <span class="notify-preview">—</span>
+    </div>
+</div>
+{% endmacro %}
 
+<form method="POST" action="{{ url_for('settings') }}">
     <div class="card">
         <div class="card-header">Каналы доставки</div>
         <div class="card-body p-0">
@@ -69,6 +68,7 @@
                                {% if cfg.telegram_enabled == '1' %}checked{% endif %}>
                         <label class="form-check-label" for="telegram_enabled">Отправлять в Telegram</label>
                     </div>
+                    {{ notify_events('telegram') }}
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label" for="telegram_token">Токен бота</label>
@@ -112,6 +112,7 @@
                                {% if cfg.max_enabled == '1' %}checked{% endif %}>
                         <label class="form-check-label" for="max_enabled">Отправлять в MAX</label>
                     </div>
+                    {{ notify_events('max') }}
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label" for="max_token">Токен бота</label>
@@ -154,6 +155,7 @@
                                {% if cfg.email_enabled == '1' %}checked{% endif %}>
                         <label class="form-check-label" for="email_enabled">Отправлять на e-mail</label>
                     </div>
+                    {{ notify_events('email') }}
                     <div class="row g-3">
                         <div class="col-md-5">
                             <label class="form-label" for="smtp_host">SMTP-сервер</label>
@@ -233,6 +235,7 @@
                                {% if cfg.zabbix_enabled == '1' %}checked{% endif %}>
                         <label class="form-check-label" for="zabbix_enabled">Отправлять в Zabbix</label>
                     </div>
+                    {{ notify_events('zabbix') }}
                     <div class="row g-3">
                         <div class="col-md-3">
                             <label class="form-label" for="zabbix_server">Сервер</label>
@@ -282,6 +285,7 @@
                                {% if cfg.syslog_enabled == '1' %}checked{% endif %}>
                         <label class="form-check-label" for="syslog_enabled">Отправлять в Syslog</label>
                     </div>
+                    {{ notify_events('syslog') }}
                     <div class="row g-3">
                         <div class="col-md-4">
                             <label class="form-label" for="syslog_host">Сервер</label>
@@ -363,10 +367,6 @@
         });
     }
 
-    var opened = document.getElementById('notify_opened_enabled');
-    var closed = document.getElementById('notify_closed_enabled');
-    var lang = document.getElementById('notify_lang');
-    var preview = document.getElementById('notifyPreviewText');
     var TEXT = {
         ru: {opened: 'Новый открытый порт 80 на 10.0.0.1',
              closed: 'Порт 80 закрыт на 10.0.0.1'},
@@ -374,19 +374,23 @@
              closed: 'Port 80 closed on 10.0.0.1'}
     };
 
-    function renderPreview() {
+    function renderPreview(block) {
+        var preview = block.querySelector('.notify-preview');
         if (!preview) return;
+        var lang = block.querySelector('select');
         var t = TEXT[(lang && lang.value) || 'ru'] || TEXT.ru;
         var parts = [];
-        if (opened && opened.checked) parts.push(t.opened);
-        if (closed && closed.checked) parts.push(t.closed);
-        preview.textContent = parts.length ? parts.join(' · ') : 'оповещения о портах выключены';
+        block.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+            if (!input.checked) return;
+            parts.push(input.name.indexOf('_notify_closed') >= 0 ? t.closed : t.opened);
+        });
+        preview.textContent = parts.length ? parts.join(' · ') : 'события не отправляются';
     }
 
-    [opened, closed, lang].forEach(function (el) {
-        if (el) el.addEventListener('change', renderPreview);
+    document.querySelectorAll('.channel__events').forEach(function (block) {
+        block.addEventListener('change', function () { renderPreview(block); });
+        renderPreview(block);
     });
-    renderPreview();
 })();
 </script>
 {% endblock %}

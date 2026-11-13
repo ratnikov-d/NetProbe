@@ -1125,3 +1125,36 @@ pre.log {
 .settings-group__title { font-weight: 700; margin: 0; font-size: 1rem; }
 
 .form-check-label { white-space: normal; }.settings-group .btn { white-space: nowrap; }
+
+/* выпадающие меню: цвета темы, иначе в тёмной теме белый фон */
+.dropdown-menu {
+    --bs-dropdown-bg: var(--surface);
+    --bs-dropdown-border-color: var(--line);
+    --bs-dropdown-color: var(--text);
+    --bs-dropdown-link-color: var(--text);
+    --bs-dropdown-link-hover-color: var(--text);
+    --bs-dropdown-link-hover-bg: var(--surface-2);
+    --bs-dropdown-link-active-color: var(--text);
+    --bs-dropdown-link-active-bg: rgba(76, 110, 245, .16);
+    --bs-dropdown-divider-bg: var(--line);
+    --bs-dropdown-header-color: var(--muted);
+    box-shadow: var(--shadow);
+}
+
+[data-theme="dark"] .dropdown-menu {
+    --bs-dropdown-bg: var(--surface);
+    --bs-dropdown-link-hover-bg: #131c2e;
+    --bs-dropdown-link-active-bg: rgba(124, 156, 255, .2);
+}
+
+.np-scan-menu .dropdown-menu { min-width: 15rem; }
+.np-scan-menu .dropdown-item { text-align: left; }
+
+/* блок типов оповещений внутри канала */
+.channel__events {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: .75rem .9rem;
+    margin-bottom: .9rem;
+}

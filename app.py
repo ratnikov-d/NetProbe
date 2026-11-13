@@ -630,24 +630,33 @@ def chunks(seq, size):
 # --------------------------------------------------------------- уведомления
 
 SETTING_DEFAULTS = {
-    'notify_lang': 'ru',
-    'notify_opened_enabled': '1',
-    'notify_closed_enabled': '0',
     'telegram_enabled': '0',
     'telegram_token': '',
     'telegram_chat': '',
+    'telegram_notify_opened': '1',
+    'telegram_notify_closed': '0',
+    'telegram_lang': 'ru',
     'max_enabled': '0',
     'max_token': '',
     'max_chat': '',
+    'max_notify_opened': '1',
+    'max_notify_closed': '0',
+    'max_lang': 'ru',
     'zabbix_enabled': '0',
     'zabbix_host': '',
     'zabbix_port': '10051',
     'zabbix_server': '',
     'zabbix_key': 'port.scanner',
+    'zabbix_notify_opened': '1',
+    'zabbix_notify_closed': '0',
+    'zabbix_lang': 'ru',
     'syslog_enabled': '0',
     'syslog_host': '',
     'syslog_port': '514',
     'syslog_proto': 'udp',
+    'syslog_notify_opened': '1',
+    'syslog_notify_closed': '0',
+    'syslog_lang': 'ru',
     'email_enabled': '0',
     'smtp_host': '',
     'smtp_port': '25',
@@ -657,17 +666,39 @@ SETTING_DEFAULTS = {
     'smtp_ssl': '0',
     'mail_from': '',
     'mail_to': '',
+    'email_notify_opened': '1',
+    'email_notify_closed': '0',
+    'email_lang': 'ru',
 }
 
 NOTIFY_GROUPS = {
-    'telegram': ('telegram_enabled', 'telegram_token', 'telegram_chat'),
-    'max': ('max_enabled', 'max_token', 'max_chat'),
+    'telegram': ('telegram_enabled', 'telegram_token', 'telegram_chat',
+                 'telegram_notify_opened', 'telegram_notify_closed', 'telegram_lang'),
+    'max': ('max_enabled', 'max_token', 'max_chat',
+            'max_notify_opened', 'max_notify_closed', 'max_lang'),
     'zabbix': ('zabbix_enabled', 'zabbix_server', 'zabbix_port', 'zabbix_host',
-               'zabbix_key'),
-    'syslog': ('syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_proto'),
+               'zabbix_key', 'zabbix_notify_opened', 'zabbix_notify_closed',
+               'zabbix_lang'),
+    'syslog': ('syslog_enabled', 'syslog_host', 'syslog_port', 'syslog_proto',
+               'syslog_notify_opened', 'syslog_notify_closed', 'syslog_lang'),
     'email': ('email_enabled', 'smtp_host', 'smtp_port', 'smtp_user',
-              'smtp_password', 'smtp_tls', 'smtp_ssl', 'mail_from', 'mail_to'),
+              'smtp_password', 'smtp_tls', 'smtp_ssl', 'mail_from', 'mail_to',
+              'email_notify_opened', 'email_notify_closed', 'email_lang'),
 }
+
+# поля-переключатели в форме настроек
+CHECKBOX_FIELDS = ('_enabled', '_notify_opened', '_notify_closed')
+
+
+def form_settings_values():
+    """Собирает значения формы настроек: переключатели → '0'/'1'."""
+    values = {}
+    for key in SETTING_DEFAULTS:
+        if key.endswith(CHECKBOX_FIELDS) or key in ('smtp_tls', 'smtp_ssl'):
+            values[key] = '1' if request.form.get(key) else '0'
+        else:
+            values[key] = (request.form.get(key) or '').strip()
+    return values
 
 
 def get_settings():
@@ -834,24 +865,41 @@ NOTIFY_TEXT = {
 }
 
 
-def notify_lang(cfg=None):
+def notify_lang(cfg, channel=None):
+    """Язык сообщений: у каждого канала свой (по умолчанию русский)."""
+    key = f'{channel}_lang' if channel else 'notify_lang'
+    return 'en' if str(cfg.get(key) or 'ru').lower() == 'en' else 'ru'
+
+
+def notify_text(kind, ip, port, proto='tcp', cfg=None, channel=None):
+    """Текст события на языке канала: kind — opened/closed."""
     cfg = cfg if cfg is not None else get_settings()
-    return 'en' if str(cfg.get('notify_lang') or 'ru').lower() == 'en' else 'ru'
-
-
-def notify_text(kind, ip, port, proto='tcp', cfg=None):
-    """Текст события на выбранном языке: kind — opened/closed."""
-    lang = notify_lang(cfg)
+    lang = notify_lang(cfg, channel)
     proto = 'udp' if proto == 'udp' else 'tcp'
     return NOTIFY_TEXT[lang][kind][proto].format(ip=ip, port=port)
 
 
 def notify_event(kind, ip, port, proto='tcp'):
-    """Отправляет оповещение, если в настройках включён этот тип событий."""
+    """Оповещение о событии порта: у каждого канала свои типы и язык."""
     cfg = get_settings()
-    if cfg.get(f'notify_{kind}_enabled') != '1':
+    outbox = []
+    for name in CHANNEL_SENDERS:
+        if cfg.get(f'{name}_enabled') != '1':
+            continue
+        if cfg.get(f'{name}_notify_{kind}') != '1':
+            continue
+        outbox.append((name, notify_text(kind, ip, port, proto, cfg, name)))
+    if not outbox:
         return
-    notify_async(notify_text(kind, ip, port, proto, cfg))
+
+    def deliver():
+        for name, message in outbox:
+            try:
+                CHANNEL_SENDERS[name](get_settings(), message)
+            except Exception:  # noqa: BLE001
+                pass
+
+    threading.Thread(target=deliver, daemon=True).start()
 
 
 
@@ -2606,13 +2654,7 @@ def alerts():
 @permission_required('settings')
 def settings():
     if request.method == 'POST':
-        values = {}
-        for key in SETTING_DEFAULTS:
-            if key.endswith('_enabled') or key in ('smtp_tls', 'smtp_ssl'):
-                values[key] = '1' if request.form.get(key) else '0'
-            else:
-                values[key] = (request.form.get(key) or '').strip()
-        save_settings(values)
+        save_settings(form_settings_values())
         flash('Настройки сохранены', 'success')
         return redirect(url_for('settings'))
 
@@ -2642,17 +2684,11 @@ def settings_test(channel):
         return redirect(url_for('settings'))
 
     # сохраняем то, что ввели в форме, чтобы проверять актуальные значения
-    values = {}
-    for key in SETTING_DEFAULTS:
-        if key.endswith('_enabled') or key in ('smtp_tls', 'smtp_ssl'):
-            values[key] = '1' if request.form.get(key) else '0'
-        else:
-            values[key] = (request.form.get(key) or '').strip()
-    save_settings(values)
+    save_settings(form_settings_values())
 
     try:
         cfg = get_settings()
-        sender(cfg, NOTIFY_TEXT[notify_lang(cfg)]['test'])
+        sender(cfg, NOTIFY_TEXT[notify_lang(cfg, channel)]['test'])
     except Exception as e:  # noqa: BLE001
         flash(f'Не отправлено ({channel}): {e}', 'danger')
     else:
