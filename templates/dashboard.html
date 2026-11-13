@@ -331,27 +331,30 @@
                 </div>
                 <div class="modal-body">
                     <p class="small-muted mb-3">Адрес: <span class="mono" id="scanPortIp">—</span></p>
-                    <div class="row g-3">
-                        <div class="col-6">
-                            <label class="form-label small">Протокол</label>
-                            <div class="np-proto-pick" role="radiogroup" aria-label="Протокол">
-                                <input class="np-proto-pick__input" type="radio" name="proto"
-                                       id="scanPortProtoTcp" value="tcp" checked>
-                                <label class="np-proto-pick__chip np-proto-pick__chip--tcp"
-                                       for="scanPortProtoTcp">TCP</label>
-                                <input class="np-proto-pick__input" type="radio" name="proto"
-                                       id="scanPortProtoUdp" value="udp">
-                                <label class="np-proto-pick__chip np-proto-pick__chip--udp"
-                                       for="scanPortProtoUdp">UDP</label>
-                            </div>
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small" for="scanPortNumber">Номер порта</label>
-                            <input class="form-control" id="scanPortNumber" name="port"
-                                   inputmode="numeric" maxlength="5" placeholder="80" required>
+                    <div class="mb-3">
+                        <label class="form-label small mb-2">Протокол</label>
+                        <div class="np-proto-pick np-proto-pick--field" role="radiogroup"
+                             aria-label="Протокол">
+                            <input class="np-proto-pick__input" type="radio" name="proto"
+                                   id="scanPortProtoBoth" value="both" checked>
+                            <label class="np-proto-pick__chip np-proto-pick__chip--both"
+                                   for="scanPortProtoBoth">TCP и UDP</label>
+                            <input class="np-proto-pick__input" type="radio" name="proto"
+                                   id="scanPortProtoTcp" value="tcp">
+                            <label class="np-proto-pick__chip np-proto-pick__chip--tcp"
+                                   for="scanPortProtoTcp">TCP</label>
+                            <input class="np-proto-pick__input" type="radio" name="proto"
+                                   id="scanPortProtoUdp" value="udp">
+                            <label class="np-proto-pick__chip np-proto-pick__chip--udp"
+                                   for="scanPortProtoUdp">UDP</label>
                         </div>
                     </div>
-                    <div class="form-text">Будет проверен только этот порт, остальные не сканируются.</div>
+                    <div>
+                        <label class="form-label small" for="scanPortNumber">Номер порта</label>
+                        <input class="form-control" id="scanPortNumber" name="port"
+                               inputmode="numeric" maxlength="5" placeholder="80" required>
+                    </div>
+                    <div class="form-text">Проверяется только этот порт, остальные не сканируются.</div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
@@ -805,7 +808,7 @@
         var scanPortForm = document.getElementById('scanPortForm');
         var scanPortIpEl = document.getElementById('scanPortIp');
         var scanPortNumber = document.getElementById('scanPortNumber');
-        var scanPortProtoTcp = document.getElementById('scanPortProtoTcp');
+        var scanPortProtoBoth = document.getElementById('scanPortProtoBoth');
 
         document.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-scan-port]');
@@ -813,7 +816,7 @@
             scanPortForm.action = '/ip/' + encodeURIComponent(btn.dataset.scanPort) + '/scan-port';
             if (scanPortIpEl) scanPortIpEl.textContent = btn.dataset.scanPort;
             if (scanPortNumber) { scanPortNumber.value = ''; }
-            if (scanPortProtoTcp) { scanPortProtoTcp.checked = true; }
+            if (scanPortProtoBoth) { scanPortProtoBoth.checked = true; }
             scanPortModal.show();
             if (scanPortNumber) setTimeout(function () { scanPortNumber.focus(); }, 250);
         });

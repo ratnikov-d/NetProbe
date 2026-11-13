@@ -1049,11 +1049,20 @@ pre.log {
 .np-proto-pick__input:checked + .np-proto-pick__chip--both {
     color: var(--text);
     background: linear-gradient(90deg,
-        rgba(18, 184, 134, .26) 0%,
-        rgba(18, 184, 134, .16) 38%,
-        rgba(139, 92, 246, .16) 62%,
-        rgba(139, 92, 246, .28) 100%);
+        rgba(18, 184, 134, .32) 0%,
+        rgba(18, 184, 134, .32) 45%,
+        rgba(139, 92, 246, .32) 55%,
+        rgba(139, 92, 246, .32) 100%);
     border-color: rgba(120, 130, 200, .45);
+}
+
+/* плашки протокола в модальных окнах: размер как у полей формы */
+.np-proto-pick--field { gap: .4rem; }
+
+.np-proto-pick--field .np-proto-pick__chip {
+    padding: .4rem .85rem;
+    font-size: .84rem;
+    line-height: 1.5;
 }
 
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--tcp {
@@ -1069,13 +1078,13 @@ pre.log {
 }
 
 [data-theme="dark"] .np-proto-pick__input:checked + .np-proto-pick__chip--both {
-    color: #e7ecf6;
+    color: #eef3ff;
     background: linear-gradient(90deg,
-        rgba(45, 212, 160, .28) 0%,
-        rgba(45, 212, 160, .18) 38%,
-        rgba(167, 139, 250, .18) 62%,
-        rgba(167, 139, 250, .32) 100%);
-    border-color: rgba(140, 160, 220, .45);
+        rgba(45, 212, 160, .42) 0%,
+        rgba(45, 212, 160, .42) 45%,
+        rgba(167, 139, 250, .46) 55%,
+        rgba(167, 139, 250, .46) 100%);
+    border-color: rgba(150, 175, 240, .5);
 }
 
 /* незаметная панель под таблицей */

@@ -3094,7 +3094,9 @@ def ip_scan_port(ip):
         flash('Некорректный IP', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
 
-    proto = 'udp' if (request.form.get('proto') or '').strip().lower() == 'udp' else 'tcp'
+    proto = (request.form.get('proto') or '').strip().lower()
+    if proto not in ('tcp', 'udp', 'both'):
+        proto = 'both'
     try:
         port = int((request.form.get('port') or '').strip())
     except ValueError:
@@ -3103,15 +3105,17 @@ def ip_scan_port(ip):
         flash('Введите номер порта от 1 до 65535', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
 
+    tcp_text = str(port) if proto in ('tcp', 'both') else ''
+    udp_text = str(port) if proto in ('udp', 'both') else ''
     try:
-        log_id = start_scan(f'{ip}-{ip}', '' if proto == 'udp' else str(port),
-                            str(SCAN_WORKERS),
-                            udp_ports_text=str(port) if proto == 'udp' else '',
-                            allow_empty_ports=(proto == 'udp'))
+        log_id = start_scan(f'{ip}-{ip}', tcp_text, str(SCAN_WORKERS),
+                            udp_ports_text=udp_text,
+                            allow_empty_ports=not tcp_text)
     except ValueError as e:
         flash(f'Ошибка: {e}', 'danger')
         return redirect(request.referrer or url_for('dashboard'))
-    flash(f'Проверка {ip}:{port} ({proto.upper()}) запущена, задание #{log_id}',
+    proto_text = {'tcp': 'TCP', 'udp': 'UDP', 'both': 'TCP и UDP'}[proto]
+    flash(f'Проверка {ip}:{port} ({proto_text}) запущена, задание #{log_id}',
           'success')
     return redirect(request.referrer or url_for('dashboard'))
 
